@@ -1,0 +1,98 @@
+﻿import { AnimatePresence, motion } from "framer-motion";
+import { Check } from "lucide-react";
+import { Button } from "../../../components/ui/Button";
+import { Input } from "../../../components/ui/Input";
+import type { ClassActivity } from "../services/studentClassroomService";
+
+type StudentSubmissionModalProps = {
+  activity: ClassActivity | null;
+  essayContent: string;
+  fileName: string;
+  isSubmitting: boolean;
+  onChangeEssay: (value: string) => void;
+  onSelectFile: (fileName: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+};
+
+export function StudentSubmissionModal({
+  activity,
+  essayContent,
+  fileName,
+  isSubmitting,
+  onChangeEssay,
+  onSelectFile,
+  onClose,
+  onSubmit,
+}: StudentSubmissionModalProps) {
+  return (
+    <AnimatePresence>
+      {activity && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <motion.button
+            className="absolute inset-0 bg-[var(--sidebar-backdrop)]"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+          />
+
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.98 }}
+            transition={{ duration: 0.2 }}
+            className="theme-surface relative w-full max-w-xl rounded-3xl overflow-hidden"
+          >
+            <div className="border-b theme-border px-6 py-5">
+              <p className="text-sm font-medium theme-title">Submit activity work</p>
+              <h3 className="mt-1 text-xl font-bold text-[var(--app-text)]">{activity.title}</h3>
+            </div>
+
+            <div className="space-y-4 p-6">
+              {activity.submissionType === "essay" ? (
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-[var(--app-text)]">
+                    Essay Content
+                  </label>
+                  <textarea
+                    value={essayContent}
+                    onChange={(event) => onChangeEssay(event.target.value)}
+                    rows={7}
+                    className="theme-ring w-full rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)] px-3 py-2 text-sm text-[var(--app-text)]"
+                    placeholder="Write your essay here..."
+                  />
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-[var(--app-text)]">Upload File</label>
+                  <Input
+                    type="file"
+                    onChange={(event) => {
+                      const selected = event.target.files?.[0];
+                      onSelectFile(selected?.name ?? "");
+                    }}
+                    className="bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)]"
+                  />
+                  {fileName && (
+                    <p className="text-xs theme-muted">Selected file: {fileName}</p>
+                  )}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <Button type="button" variant="outline" onClick={onClose}>
+                  Cancel
+                </Button>
+                <Button onClick={onSubmit} disabled={isSubmitting}>
+                  <Check className="mr-2 h-4 w-4" />
+                  {isSubmitting ? "Submitting..." : "Submit Work"}
+                </Button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+}

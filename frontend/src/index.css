@@ -1,0 +1,86 @@
+@import url("https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap");
+@import "tailwindcss";
+
+:root {
+  --app-bg: #d8d5e1;
+  --app-bg-soft: #e8e5ef;
+  --app-surface: #eceaf3;
+  --app-surface-strong: #f4f2f8;
+  --app-text: #384764;
+  --app-muted: #5c6783;
+  --app-accent: #b428ea;
+  --app-accent-2: #e04ba8;
+  --app-border: #d99ff8;
+  --app-ring: rgba(180, 40, 234, 0.3);
+  --app-shadow: 0 20px 45px rgba(65, 45, 110, 0.15);
+  --sidebar-backdrop: rgba(24, 17, 38, 0.42);
+}
+
+:root.dark {
+  --app-bg: #030106;
+  --app-bg-soft: #08030f;
+  --app-surface: #120621;
+  --app-surface-strong: #1a0a2e;
+  --app-text: #f8f4ff;
+  --app-muted: #c2b5d9;
+  --app-accent: #c43bf2;
+  --app-accent-2: #df4ca7;
+  --app-border: #c058f2;
+  --app-ring: rgba(196, 59, 242, 0.35);
+  --app-shadow: 0 20px 45px rgba(8, 2, 18, 0.48);
+  --sidebar-backdrop: rgba(1, 1, 4, 0.64);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  font-family: "Sora", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  background: radial-gradient(
+      circle at 18% -12%,
+      color-mix(in srgb, var(--app-accent) 20%, transparent),
+      transparent 42%
+    ),
+    radial-gradient(
+      circle at 86% 5%,
+      color-mix(in srgb, var(--app-accent-2) 18%, transparent),
+      transparent 40%
+    ),
+    var(--app-bg);
+  color: var(--app-text);
+  transition:
+    background 220ms ease,
+    color 220ms ease;
+}
+
+.theme-surface {
+  background: color-mix(in srgb, var(--app-surface) 93%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-border) 30%, transparent);
+  box-shadow: var(--app-shadow);
+}
+
+.theme-card {
+  background: color-mix(in srgb, var(--app-surface-strong) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-border) 24%, transparent);
+  box-shadow: var(--app-shadow);
+}
+
+.theme-title {
+  color: var(--app-accent);
+}
+
+.theme-muted {
+  color: var(--app-muted);
+}
+
+.theme-border {
+  border-color: color-mix(in srgb, var(--app-border) 36%, transparent);
+}
+
+.theme-ring:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--app-ring);
+}
