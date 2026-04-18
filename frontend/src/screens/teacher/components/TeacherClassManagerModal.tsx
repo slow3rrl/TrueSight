@@ -29,9 +29,11 @@ type TeacherClassManagerModalProps = {
   activityForm: ActivityFormState;
   isCreatingActivity: boolean;
   isAnalyzing: boolean;
+  analyzingSubmissionId: string | null;
   expandedSubmissionId: string | null;
   onClose: () => void;
   onAnalyzeAll: () => void;
+  onAnalyzeSubmission: (submissionId: string) => void;
   onSubmitActivity: (event: React.FormEvent) => void;
   onChangeActivityForm: (patch: Partial<ActivityFormState>) => void;
   onToggleSubmission: (submissionId: string) => void;
@@ -48,9 +50,11 @@ export function TeacherClassManagerModal({
   activityForm,
   isCreatingActivity,
   isAnalyzing,
+  analyzingSubmissionId,
   expandedSubmissionId,
   onClose,
   onAnalyzeAll,
+  onAnalyzeSubmission,
   onSubmitActivity,
   onChangeActivityForm,
   onToggleSubmission,
@@ -261,16 +265,35 @@ export function TeacherClassManagerModal({
                                         ? `${submission.aiProbability.toFixed(2)}% AI probability`
                                         : "Not analyzed"}
                                     </span>
+                                    {typeof submission.confidenceScore === "number" && (
+                                      <p className="mt-1 text-xs theme-muted">
+                                        Confidence: {submission.confidenceScore.toFixed(2)}%
+                                      </p>
+                                    )}
                                     <p className="mt-1 text-xs theme-muted">{submission.status}</p>
                                   </div>
                                 </div>
 
-                                <button
-                                  onClick={() => onToggleSubmission(submission.id)}
-                                  className="text-sm text-[var(--app-accent)] hover:underline"
-                                >
-                                  {expanded ? "Hide" : "View"} detailed analysis
-                                </button>
+                                <div className="flex flex-wrap items-center gap-3">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => onAnalyzeSubmission(submission.id)}
+                                    disabled={isAnalyzing || analyzingSubmissionId === submission.id}
+                                  >
+                                    <WandSparkles className="mr-2 h-4 w-4" />
+                                    {analyzingSubmissionId === submission.id
+                                      ? "Analyzing..."
+                                      : "Analyze"}
+                                  </Button>
+
+                                  <button
+                                    onClick={() => onToggleSubmission(submission.id)}
+                                    className="text-sm text-[var(--app-accent)] hover:underline"
+                                  >
+                                    {expanded ? "Hide" : "View"} detailed analysis
+                                  </button>
+                                </div>
 
                                 {expanded && (
                                   <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)] p-3 space-y-2 text-sm text-[var(--app-text)]">
@@ -289,6 +312,27 @@ export function TeacherClassManagerModal({
                                           <p>
                                             <span className="font-medium">Verdict:</span>{" "}
                                             {submission.analysisDetails.verdict}
+                                          </p>
+                                        )}
+
+                                        {typeof submission.aiProbability === "number" && (
+                                          <p>
+                                            <span className="font-medium">AI Probability:</span>{" "}
+                                            {submission.aiProbability.toFixed(2)}%
+                                          </p>
+                                        )}
+
+                                        {typeof submission.humanProbability === "number" && (
+                                          <p>
+                                            <span className="font-medium">Human Probability:</span>{" "}
+                                            {submission.humanProbability.toFixed(2)}%
+                                          </p>
+                                        )}
+
+                                        {typeof submission.confidenceScore === "number" && (
+                                          <p>
+                                            <span className="font-medium">Confidence Score:</span>{" "}
+                                            {submission.confidenceScore.toFixed(2)}%
                                           </p>
                                         )}
 

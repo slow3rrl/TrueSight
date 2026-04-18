@@ -9,6 +9,7 @@ import { Input } from "../../components/ui/Input";
 import { GlobalThemeToggle } from "../../components/theme/GlobalThemeToggle";
 import { useAuth } from "../../context/useAuth";
 import {
+  analyzeSingleSubmission,
   analyzeAllClassSubmissions,
   createClassActivity,
   createTeacherClass,
@@ -28,6 +29,7 @@ import {
   type TeacherSection,
 } from "./components/TeacherSidebar";
 import { TeacherClassManagerModal } from "./components/TeacherClassManagerModal";
+import { TeacherSettingsPanel } from "./components/TeacherSettingsPanel";
 
 type Section = TeacherSection;
 
@@ -79,7 +81,6 @@ export default function TeacherScreen() {
   const activeSection = resolveSection(section);
 
   const teacherName = user?.name ?? "Teacher";
-  const teacherEmail = user?.email ?? "";
 
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [classes, setClasses] = useState<TeacherClass[]>([]);
@@ -110,12 +111,8 @@ export default function TeacherScreen() {
   });
   const [isCreatingActivity, setIsCreatingActivity] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analyzingSubmissionId, setAnalyzingSubmissionId] = useState<string | null>(null);
   const [expandedSubmissionId, setExpandedSubmissionId] = useState<string | null>(null);
-
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [emailSummaryEnabled, setEmailSummaryEnabled] = useState(true);
-
-  const profileImage = localStorage.getItem(`profile-image-${teacherName}`);
 
   const totalStudents = useMemo(
     () => classes.reduce((sum, classroom) => sum + classroom.students, 0),
@@ -306,6 +303,30 @@ export default function TeacherScreen() {
       toast.error(message);
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  const handleAnalyzeSubmission = async (submissionId: string) => {
+    if (!managedClass || isAnalyzing || analyzingSubmissionId) {
+      return;
+    }
+
+    setAnalyzingSubmissionId(submissionId);
+
+    try {
+      const result = await analyzeSingleSubmission(submissionId);
+      const confidenceSuffix =
+        typeof result.confidenceScore === "number"
+          ? ` (${result.confidenceScore.toFixed(2)}% confidence)`
+          : "";
+
+      toast.success(`Submission analyzed${confidenceSuffix}.`);
+      await loadClassManagerData(managedClass.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to analyze submission.";
+      toast.error(message);
+    } finally {
+      setAnalyzingSubmissionId(null);
     }
   };
 
@@ -514,76 +535,9 @@ export default function TeacherScreen() {
   );
 
   const renderSettings = () => (
-    <Card className="theme-card max-w-3xl">
-      <CardContent className="space-y-5 p-5">
-        <div>
-          <p className="text-sm theme-muted">Teacher Account</p>
-          <h2 className="text-2xl font-bold text-[var(--app-text)]">Settings</h2>
-        </div>
-
-        <div className="flex items-center gap-4 rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)] p-4">
-          <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--app-accent)_18%,transparent)] text-[var(--app-accent)]">
-            {profileImage ? (
-              <img src={profileImage} alt="Teacher" className="h-full w-full object-cover" />
-            ) : (
-              <span className="text-lg font-bold">{teacherName.charAt(0)}</span>
-            )}
-          </div>
-          <div>
-            <p className="font-semibold text-[var(--app-text)]">{teacherName}</p>
-            <p className="text-sm theme-muted">{teacherEmail}</p>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="flex items-center justify-between rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)] p-4">
-            <div>
-              <p className="font-medium text-[var(--app-text)]">In-app notifications</p>
-              <p className="text-sm theme-muted">Receive submission and activity alerts.</p>
-            </div>
-            <button
-              onClick={() => setNotificationsEnabled((value) => !value)}
-              className={[
-                "theme-ring h-7 w-12 rounded-full p-1 transition-colors",
-                notificationsEnabled
-                  ? "bg-[var(--app-accent)]"
-                  : "bg-[color-mix(in_srgb,var(--app-muted)_35%,transparent)]",
-              ].join(" ")}
-            >
-              <span
-                className={[
-                  "block h-5 w-5 rounded-full bg-white transition-transform",
-                  notificationsEnabled ? "translate-x-5" : "translate-x-0",
-                ].join(" ")}
-              />
-            </button>
-          </div>
-
-          <div className="flex items-center justify-between rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)] p-4">
-            <div>
-              <p className="font-medium text-[var(--app-text)]">Weekly email summary</p>
-              <p className="text-sm theme-muted">Digest for class performance and deadlines.</p>
-            </div>
-            <button
-              onClick={() => setEmailSummaryEnabled((value) => !value)}
-              className={[
-                "theme-ring h-7 w-12 rounded-full p-1 transition-colors",
-                emailSummaryEnabled
-                  ? "bg-[var(--app-accent)]"
-                  : "bg-[color-mix(in_srgb,var(--app-muted)_35%,transparent)]",
-              ].join(" ")}
-            >
-              <span
-                className={[
-                  "block h-5 w-5 rounded-full bg-white transition-transform",
-                  emailSummaryEnabled ? "translate-x-5" : "translate-x-0",
-                ].join(" ")}
-              />
-            </button>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+    <TeacherSettingsPanel
+      onAccountDeleted={() => navigate("/auth/login_screen", { replace: true })}
+    />
   );
 
   return (
@@ -726,9 +680,11 @@ export default function TeacherScreen() {
         activityForm={activityForm}
         isCreatingActivity={isCreatingActivity}
         isAnalyzing={isAnalyzing}
+        analyzingSubmissionId={analyzingSubmissionId}
         expandedSubmissionId={expandedSubmissionId}
         onClose={() => setIsClassManagerOpen(false)}
         onAnalyzeAll={handleAnalyzeAll}
+        onAnalyzeSubmission={(submissionId) => void handleAnalyzeSubmission(submissionId)}
         onSubmitActivity={handleCreateActivity}
         onChangeActivityForm={(patch) =>
           setActivityForm((previous) => ({

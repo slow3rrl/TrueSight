@@ -4,17 +4,15 @@ import {
   Eye,
   EyeOff,
   Loader2,
-  Moon,
-  Sun,
+  Lock,
+  Mail,
   School,
   User,
-  Mail,
-  Lock,
   UserPlus,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
-import { type UserRole } from "../context/auth-types";
+import type { UserRole } from "../context/auth-types";
 
 type FormErrors = {
   fullName?: string;
@@ -24,35 +22,30 @@ type FormErrors = {
   general?: string;
 };
 
-function getErrorMessage(error: unknown): string {
+const isValidEmail = (email: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+const getErrorMessage = (error: unknown): string => {
   if (error instanceof Error) return error.message;
   return "Something went wrong. Please try again.";
-}
-
-function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
+};
 
 export default function SignupScreen() {
   const navigate = useNavigate();
-  const { signUp, darkMode, toggleTheme } = useAuth();
+  const { signUp } = useAuth();
 
   const [role, setRole] = useState<UserRole>("student");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
   const [touched, setTouched] = useState({
     fullName: false,
     email: false,
     password: false,
     confirmPassword: false,
   });
-
   const [errors, setErrors] = useState<FormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -86,328 +79,232 @@ export default function SignupScreen() {
     return next;
   }, [fullName, email, password, confirmPassword]);
 
-const handleSignup = async () => {
-  const nextErrors: FormErrors = { ...validationErrors };
-
-  setTouched({
-    fullName: true,
-    email: true,
-    password: true,
-    confirmPassword: true,
-  });
-  setErrors(nextErrors);
-
-  if (Object.keys(nextErrors).length > 0) {
-    return;
-  }
-
-  try {
-    setIsSubmitting(true);
-    setErrors({});
-
-    // ✅ FIXED ORDER HERE
-    await signUp(fullName.trim(), email.trim(), password, role);
-     toast.success("Account created successfully! You can now log in.");
-
-    navigate("/auth/login_screen", {
-      replace: true,
+  const handleSignup = async () => {
+    const nextErrors: FormErrors = { ...validationErrors };
+    setTouched({
+      fullName: true,
+      email: true,
+      password: true,
+      confirmPassword: true,
     });
-  } catch (error: unknown) {
-    setErrors({
-      general: getErrorMessage(error),
-    });
-  } finally {
-    setIsSubmitting(false);
-  }
-};
+    setErrors(nextErrors);
 
-  const cardClass = darkMode
-    ? "border-white/10 bg-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.35)]"
-    : "border-white/40 bg-white/70 shadow-[0_8px_32px_rgba(31,38,135,0.18)]";
+    if (Object.keys(nextErrors).length > 0) return;
 
-  const inputBase = darkMode
-    ? "border-white/10 bg-white/5 text-white placeholder:text-slate-400"
-    : "border-slate-200 bg-white/80 text-slate-900 placeholder:text-slate-400";
-
-  const iconColor = darkMode ? "text-slate-400" : "text-slate-500";
+    try {
+      setIsSubmitting(true);
+      await signUp(fullName.trim(), email.trim(), password, role);
+      toast.success("Account created. You can now log in.");
+      navigate("/auth/login_screen", { replace: true });
+    } catch (error) {
+      setErrors({ general: getErrorMessage(error) });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
-    <div
-      className={`relative min-h-screen overflow-hidden transition-colors duration-300 ${
-        darkMode
-          ? "bg-[radial-gradient(circle_at_top,#14213d_0%,#020617_55%,#01040b_100%)] text-white"
-          : "bg-[radial-gradient(circle_at_top,#dbeafe_0%,#eff6ff_45%,#f8fafc_100%)] text-slate-900"
-      }`}
-    >
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute left-[-80px] top-[-80px] h-72 w-72 rounded-full bg-blue-500/20 blur-3xl" />
-        <div className="absolute bottom-[-120px] right-[-60px] h-80 w-80 rounded-full bg-cyan-400/20 blur-3xl" />
+    <div className="relative min-h-screen overflow-hidden bg-transparent text-[var(--app-text)]">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute left-[-120px] top-[-120px] h-80 w-80 rounded-full bg-[color-mix(in_srgb,var(--app-accent)_20%,transparent)] blur-3xl" />
+        <div className="absolute bottom-[-130px] right-[-80px] h-96 w-96 rounded-full bg-[color-mix(in_srgb,var(--app-accent-2)_20%,transparent)] blur-3xl" />
       </div>
 
       <div className="relative mx-auto flex min-h-screen max-w-6xl items-center justify-center px-6 py-10">
-        <div className="w-full max-w-md">
-          <div className="mb-6 flex justify-end">
-            <button
-              onClick={toggleTheme}
-              type="button"
-              className={`inline-flex items-center justify-center rounded-full border p-3 backdrop-blur-xl transition hover:scale-105 ${
-                darkMode
-                  ? "border-white/10 bg-white/10 text-white"
-                  : "border-slate-200 bg-white/70 text-slate-900"
-              }`}
-              aria-label="Toggle theme"
-            >
-              {darkMode ? <Sun size={20} /> : <Moon size={20} />}
-            </button>
+        <div className="theme-surface w-full max-w-md rounded-3xl p-6 sm:p-7">
+          <div className="mb-6 text-center">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,var(--app-accent),var(--app-accent-2))] text-xl font-bold text-white shadow-[var(--app-shadow)]">
+              AI
+            </div>
+            <h1 className="theme-title text-3xl font-extrabold">Create Account</h1>
+            <p className="mt-2 text-sm theme-muted">
+              Join TrueSight and start building your classroom workspace.
+            </p>
           </div>
 
-          <div
-            className={`rounded-3xl border p-6 backdrop-blur-2xl transition-all duration-300 ${cardClass}`}
-          >
-            <div className="mb-6 flex flex-col items-center text-center">
-              <img
-                src="https://via.placeholder.com/80"
-                alt="TrueSight Logo"
-                className="mb-4 h-20 w-20 rounded-2xl object-cover ring-2 ring-blue-500/40"
+          <div className="mb-5">
+            <div className="relative flex rounded-2xl border theme-border p-1 bg-[color-mix(in_srgb,var(--app-surface)_92%,transparent)]">
+              <div
+                className={[
+                  "absolute bottom-1 top-1 w-[calc(50%-4px)] rounded-xl bg-[linear-gradient(135deg,var(--app-accent),var(--app-accent-2))]",
+                  "transition-transform duration-300",
+                  role === "student" ? "translate-x-0" : "translate-x-full",
+                ].join(" ")}
               />
-              <h1 className="text-3xl font-bold">Sign Up</h1>
-              <p
-                className={`mt-2 text-sm ${
-                  darkMode ? "text-slate-300" : "text-slate-600"
-                }`}
+              <button
+                type="button"
+                onClick={() => setRole("student")}
+                className={[
+                  "relative z-10 flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold",
+                  role === "student" ? "text-white" : "text-[var(--app-muted)]",
+                ].join(" ")}
               >
-                Join TrueSight and start your journey
-              </p>
+                <School className="h-4 w-4" />
+                Student
+              </button>
+              <button
+                type="button"
+                onClick={() => setRole("teacher")}
+                className={[
+                  "relative z-10 flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold",
+                  role === "teacher" ? "text-white" : "text-[var(--app-muted)]",
+                ].join(" ")}
+              >
+                <School className="h-4 w-4" />
+                Teacher
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-[var(--app-text)]">
+                Full Name
+              </label>
+              <div className="relative">
+                <User className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-muted)]" />
+                <input
+                  type="text"
+                  value={fullName}
+                  onChange={(event) => {
+                    setFullName(event.target.value);
+                    setErrors((current) => ({ ...current, general: undefined }));
+                  }}
+                  onBlur={() => setTouched((current) => ({ ...current, fullName: true }))}
+                  placeholder="Enter your full name"
+                  className="theme-ring w-full rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_92%,transparent)] py-2.5 pl-10 pr-3 text-sm text-[var(--app-text)] placeholder:text-[var(--app-muted)]/80"
+                />
+              </div>
+              {touched.fullName && validationErrors.fullName && (
+                <p className="mt-1.5 text-xs text-rose-400">{validationErrors.fullName}</p>
+              )}
             </div>
 
-            <div className="mb-6">
-              <div
-                className={`relative flex rounded-2xl border p-1 ${
-                  darkMode
-                    ? "border-white/10 bg-white/5"
-                    : "border-slate-200 bg-slate-100/80"
-                }`}
-              >
-                <div
-                  className={`absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-xl bg-blue-600 shadow-lg transition-transform duration-300 ease-out ${
-                    role === "student" ? "translate-x-0" : "translate-x-full"
-                  }`}
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-[var(--app-text)]">
+                Email
+              </label>
+              <div className="relative">
+                <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-muted)]" />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(event) => {
+                    setEmail(event.target.value);
+                    setErrors((current) => ({ ...current, general: undefined }));
+                  }}
+                  onBlur={() => setTouched((current) => ({ ...current, email: true }))}
+                  placeholder="name@email.com"
+                  className="theme-ring w-full rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_92%,transparent)] py-2.5 pl-10 pr-3 text-sm text-[var(--app-text)] placeholder:text-[var(--app-muted)]/80"
+                />
+              </div>
+              {touched.email && validationErrors.email && (
+                <p className="mt-1.5 text-xs text-rose-400">{validationErrors.email}</p>
+              )}
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-[var(--app-text)]">
+                Password
+              </label>
+              <div className="relative">
+                <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-muted)]" />
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(event) => {
+                    setPassword(event.target.value);
+                    setErrors((current) => ({ ...current, general: undefined }));
+                  }}
+                  onBlur={() => setTouched((current) => ({ ...current, password: true }))}
+                  placeholder="Create a password"
+                  className="theme-ring w-full rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_92%,transparent)] py-2.5 pl-10 pr-10 text-sm text-[var(--app-text)] placeholder:text-[var(--app-muted)]/80"
                 />
                 <button
                   type="button"
-                  onClick={() => setRole("student")}
-                  className={`relative z-10 flex flex-1 items-center justify-center gap-2 rounded-xl py-3 text-sm font-medium transition ${
-                    role === "student"
-                      ? "text-white"
-                      : darkMode
-                        ? "text-slate-300"
-                        : "text-slate-600"
-                  }`}
+                  onClick={() => setShowPassword((current) => !current)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--app-muted)] transition hover:text-[var(--app-accent)]"
                 >
-                  <School size={18} />
-                  Student
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
+              </div>
+              {touched.password && validationErrors.password && (
+                <p className="mt-1.5 text-xs text-rose-400">{validationErrors.password}</p>
+              )}
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-[var(--app-text)]">
+                Confirm Password
+              </label>
+              <div className="relative">
+                <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-muted)]" />
+                <input
+                  type={showConfirmPassword ? "text" : "password"}
+                  value={confirmPassword}
+                  onChange={(event) => {
+                    setConfirmPassword(event.target.value);
+                    setErrors((current) => ({ ...current, general: undefined }));
+                  }}
+                  onBlur={() =>
+                    setTouched((current) => ({ ...current, confirmPassword: true }))
+                  }
+                  placeholder="Confirm your password"
+                  className="theme-ring w-full rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_92%,transparent)] py-2.5 pl-10 pr-10 text-sm text-[var(--app-text)] placeholder:text-[var(--app-muted)]/80"
+                />
                 <button
                   type="button"
-                  onClick={() => setRole("teacher")}
-                  className={`relative z-10 flex flex-1 items-center justify-center gap-2 rounded-xl py-3 text-sm font-medium transition ${
-                    role === "teacher"
-                      ? "text-white"
-                      : darkMode
-                        ? "text-slate-300"
-                        : "text-slate-600"
-                  }`}
+                  onClick={() => setShowConfirmPassword((current) => !current)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--app-muted)] transition hover:text-[var(--app-accent)]"
                 >
-                  <School size={18} />
-                  Teacher
+                  {showConfirmPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
                 </button>
               </div>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="mb-2 block text-sm font-medium">
-                  Full Name
-                </label>
-                <div className="relative">
-                  <User
-                    size={18}
-                    className={`pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 ${iconColor}`}
-                  />
-                  <input
-                    type="text"
-                    value={fullName}
-                    onChange={(e) => {
-                      setFullName(e.target.value);
-                      setErrors((prev) => ({ ...prev, general: undefined }));
-                    }}
-                    onBlur={() =>
-                      setTouched((prev) => ({ ...prev, fullName: true }))
-                    }
-                    placeholder="Enter your full name"
-                    className={`w-full rounded-2xl border py-3 pl-11 pr-4 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 ${inputBase}`}
-                  />
-                </div>
-                {touched.fullName && validationErrors.fullName && (
-                  <p className="mt-2 text-sm text-rose-400">
-                    {validationErrors.fullName}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium">Email</label>
-                <div className="relative">
-                  <Mail
-                    size={18}
-                    className={`pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 ${iconColor}`}
-                  />
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => {
-                      setEmail(e.target.value);
-                      setErrors((prev) => ({ ...prev, general: undefined }));
-                    }}
-                    onBlur={() =>
-                      setTouched((prev) => ({ ...prev, email: true }))
-                    }
-                    placeholder="Enter your email"
-                    className={`w-full rounded-2xl border py-3 pl-11 pr-4 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 ${inputBase}`}
-                  />
-                </div>
-                {touched.email && validationErrors.email && (
-                  <p className="mt-2 text-sm text-rose-400">
-                    {validationErrors.email}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium">
-                  Password
-                </label>
-                <div className="relative">
-                  <Lock
-                    size={18}
-                    className={`pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 ${iconColor}`}
-                  />
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    onChange={(e) => {
-                      setPassword(e.target.value);
-                      setErrors((prev) => ({ ...prev, general: undefined }));
-                    }}
-                    onBlur={() =>
-                      setTouched((prev) => ({ ...prev, password: true }))
-                    }
-                    placeholder="Enter password"
-                    className={`w-full rounded-2xl border py-3 pl-11 pr-12 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 ${inputBase}`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((prev) => !prev)}
-                    className={`absolute right-4 top-1/2 -translate-y-1/2 ${iconColor}`}
-                  >
-                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-                {touched.password && validationErrors.password && (
-                  <p className="mt-2 text-sm text-rose-400">
-                    {validationErrors.password}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium">
-                  Confirm Password
-                </label>
-                <div className="relative">
-                  <Lock
-                    size={18}
-                    className={`pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 ${iconColor}`}
-                  />
-                  <input
-                    type={showConfirmPassword ? "text" : "password"}
-                    value={confirmPassword}
-                    onChange={(e) => {
-                      setConfirmPassword(e.target.value);
-                      setErrors((prev) => ({ ...prev, general: undefined }));
-                    }}
-                    onBlur={() =>
-                      setTouched((prev) => ({
-                        ...prev,
-                        confirmPassword: true,
-                      }))
-                    }
-                    placeholder="Confirm password"
-                    className={`w-full rounded-2xl border py-3 pl-11 pr-12 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 ${inputBase}`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmPassword((prev) => !prev)}
-                    className={`absolute right-4 top-1/2 -translate-y-1/2 ${iconColor}`}
-                  >
-                    {showConfirmPassword ? (
-                      <EyeOff size={18} />
-                    ) : (
-                      <Eye size={18} />
-                    )}
-                  </button>
-                </div>
-                {touched.confirmPassword &&
-                  validationErrors.confirmPassword && (
-                    <p className="mt-2 text-sm text-rose-400">
-                      {validationErrors.confirmPassword}
-                    </p>
-                  )}
-              </div>
-
-              {errors.general && (
-                <div
-                  className={`rounded-2xl border px-4 py-3 text-sm ${
-                    darkMode
-                      ? "border-rose-400/20 bg-rose-500/10 text-rose-300"
-                      : "border-rose-200 bg-rose-50 text-rose-600"
-                  }`}
-                >
-                  {errors.general}
-                </div>
+              {touched.confirmPassword && validationErrors.confirmPassword && (
+                <p className="mt-1.5 text-xs text-rose-400">
+                  {validationErrors.confirmPassword}
+                </p>
               )}
-
-              <button
-                type="button"
-                onClick={handleSignup}
-                disabled={isSubmitting}
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-400"
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 size={18} className="animate-spin" />
-                    Creating account...
-                  </>
-                ) : (
-                  <>
-                    <UserPlus size={18} />
-                    Create {role === "student" ? "Student" : "Teacher"} Account
-                  </>
-                )}
-              </button>
             </div>
+
+            {errors.general && (
+              <div className="rounded-xl border border-rose-400/25 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
+                {errors.general}
+              </div>
+            )}
 
             <button
               type="button"
-              onClick={() => navigate("/auth/login_screen")}
-              className={`mt-6 w-full text-center text-sm ${
-                darkMode ? "text-slate-300" : "text-slate-600"
-              }`}
+              onClick={handleSignup}
+              disabled={isSubmitting}
+              className="theme-ring flex w-full items-center justify-center gap-2 rounded-xl bg-[linear-gradient(135deg,var(--app-accent),var(--app-accent-2))] px-4 py-2.5 text-sm font-semibold text-white transition-transform duration-200 hover:translate-y-[-1px] hover:shadow-[var(--app-shadow)] disabled:cursor-not-allowed disabled:opacity-65"
             >
-              Already have an account?{" "}
-              <span className="font-semibold text-blue-500">Login</span>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Creating account...
+                </>
+              ) : (
+                <>
+                  <UserPlus className="h-4 w-4" />
+                  Create {role === "student" ? "Student" : "Teacher"} Account
+                </>
+              )}
             </button>
           </div>
+
+          <button
+            type="button"
+            onClick={() => navigate("/auth/login_screen")}
+            className="pl-20 mt-5 text-sm theme-muted transition hover:text-[var(--app-accent)]"
+          >
+            Already have an account?{" "}
+            <span className="font-semibold text-[var(--app-accent)]">Login</span>
+          </button>
         </div>
       </div>
     </div>

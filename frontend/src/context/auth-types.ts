@@ -6,6 +6,7 @@ export type AuthUser = {
   email: string;
   role: UserRole;
   created_at: string;
+  notifications: boolean;
 };
 
 export type AuthContextType = {
@@ -21,5 +22,11 @@ export type AuthContextType = {
     role: UserRole
   ) => Promise<void>;
   getMyProfile: () => Promise<AuthUser | null>;
+  updateAccount: (input: {
+    name: string;
+    email: string;
+    notifications: boolean;
+  }) => Promise<AuthUser>;
+  deleteAccount: () => Promise<void>;
   logout: () => Promise<void>;
 };

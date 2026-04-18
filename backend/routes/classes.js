@@ -242,6 +242,11 @@ const runGPTZeroAnalysis = async (text) => {
   if (!apiKey) return null;
 
   try {
+    // GPTZero integration guide:
+    // 1) Set GPTZERO_API_KEY in backend/.env.
+    // 2) Optionally override endpoint with GPTZERO_API_URL.
+    // 3) Keep this request isolated so you can swap GPTZero versions without
+    //    touching class/submission business logic.
     const endpoint =
       process.env.GPTZERO_API_URL ?? "https://api.gptzero.me/v2/predict/text";
 
@@ -279,13 +284,34 @@ const runGPTZeroAnalysis = async (text) => {
   }
 };
 
+const buildAnalysisSummary = (analysis) => {
+  const aiProbability = clamp(Number(analysis.probability) || 0, 0, 100);
+  const humanProbability = Number((100 - aiProbability).toFixed(2));
+  const confidenceScore = Number(
+    Math.max(aiProbability, humanProbability).toFixed(2),
+  );
+
+  return {
+    aiProbability: Number(aiProbability.toFixed(2)),
+    humanProbability,
+    confidenceScore,
+    isAIGenerated: aiProbability >= 60,
+    details: {
+      ...analysis.details,
+      aiProbability: Number(aiProbability.toFixed(2)),
+      humanProbability,
+      confidenceScore,
+    },
+  };
+};
+
 const analyzeText = async (text) => {
   const fromGPTZero = await runGPTZeroAnalysis(text);
   if (fromGPTZero) {
-    return fromGPTZero;
+    return buildAnalysisSummary(fromGPTZero);
   }
 
-  return runHeuristicAnalysis(text);
+  return buildAnalysisSummary(runHeuristicAnalysis(text));
 };
 
 const getAccessibleClass = async (classId, user) => {
@@ -600,9 +626,18 @@ router.post("/activities/:activityId/submissions", protect, async (req, res) => 
       return res.status(403).json({ message: "You are not enrolled in this class." });
     }
 
-    const { contentText, fileName } = req.body;
+    const { contentText, fileName, extractedText } = req.body;
 
-    if (activity.submission_type === "essay" && !contentText?.trim()) {
+    // GPTZero integration guide for text + document scanning:
+    // - Essay flow: pass `contentText`.
+    // - File flow: upload document (PDF/DOCX/etc.), extract plain text on your
+    //   upload service, and pass the extracted body via `extractedText`.
+    // analyzeText() and GPTZero checks use this normalized text payload.
+    const normalizedContent = [contentText, extractedText]
+      .find((candidate) => typeof candidate === "string")
+      ?.trim();
+
+    if (activity.submission_type === "essay" && !normalizedContent) {
       return res.status(400).json({ message: "Essay submissions require text content." });
     }
 
@@ -623,9 +658,9 @@ router.post("/activities/:activityId/submissions", protect, async (req, res) => 
          analysis_details = NULL,
          submitted_at = NOW(),
          updated_at = NOW()
-       RETURNING id, activity_id, student_id, content_text, file_name, status,
+      RETURNING id, activity_id, student_id, content_text, file_name, status,
                  ai_probability, is_ai_generated, analysis_details, submitted_at, updated_at`,
-      [activityId, req.user.id, contentText ?? null, fileName ?? null],
+      [activityId, req.user.id, normalizedContent ?? null, fileName ?? null],
     );
 
     return res.status(200).json({
@@ -728,6 +763,69 @@ router.get("/:classId/submissions", protect, async (req, res) => {
   }
 });
 
+router.post("/submissions/:submissionId/analyze", protect, async (req, res) => {
+  try {
+    if (req.user.role !== "teacher") {
+      return res.status(403).json({ message: "Only teachers can analyze submissions." });
+    }
+
+    const submissionId = Number(req.params.submissionId);
+
+    if (!Number.isFinite(submissionId)) {
+      return res.status(400).json({ message: "Invalid submission id." });
+    }
+
+    const submissionResult = await pool.query(
+      `SELECT s.id, s.content_text, s.file_name
+       FROM submissions s
+       INNER JOIN activities a ON a.id = s.activity_id
+       INNER JOIN classes c ON c.id = a.class_id
+       WHERE s.id = $1 AND c.teacher_id = $2
+       LIMIT 1`,
+      [submissionId, req.user.id],
+    );
+
+    if (submissionResult.rows.length === 0) {
+      return res.status(404).json({
+        message: "Submission not found or not accessible in your classes.",
+      });
+    }
+
+    const submission = submissionResult.rows[0];
+    const analysis = await analyzeText(submission.content_text ?? "");
+
+    const updated = await pool.query(
+      `UPDATE submissions
+       SET status = 'analyzed',
+           ai_probability = $2,
+           is_ai_generated = $3,
+           analysis_details = $4::jsonb,
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING id, status, ai_probability, is_ai_generated, analysis_details, updated_at`,
+      [
+        submission.id,
+        analysis.aiProbability,
+        analysis.isAIGenerated,
+        JSON.stringify({
+          ...analysis.details,
+          fileName: submission.file_name ?? null,
+        }),
+      ],
+    );
+
+    return res.status(200).json({
+      message: "Submission analyzed successfully.",
+      submission: updated.rows[0],
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Failed to analyze submission.",
+      error: error.message,
+    });
+  }
+});
+
 router.post("/:classId/submissions/analyze", protect, async (req, res) => {
   try {
     if (req.user.role !== "teacher") {
@@ -778,7 +876,7 @@ router.post("/:classId/submissions/analyze", protect, async (req, res) => {
          WHERE id = $1`,
         [
           submission.id,
-          analysis.probability,
+          analysis.aiProbability,
           analysis.isAIGenerated,
           JSON.stringify({
             ...analysis.details,

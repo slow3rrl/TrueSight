@@ -1,4 +1,5 @@
 export {
+  analyzeSingleSubmission,
   analyzeAllClassSubmissions,
   createClassActivity,
   createTeacherClass,
@@ -8,6 +9,7 @@ export {
   fetchTeacherClasses,
   type ActivitySubmissionType,
   type ClassActivity,
+  type SubmissionAnalysisResult,
   type ClassSubmission,
   type EnrolledStudent,
   type TeacherClass,

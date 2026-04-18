@@ -20,6 +20,8 @@ export type StudentActivitySubmission = {
   id: string;
   status: string;
   aiProbability: number | null;
+  humanProbability: number | null;
+  confidenceScore: number | null;
   isAIGenerated: boolean | null;
   analysisDetails: Record<string, unknown> | null;
   submittedAt: string | null;
@@ -61,9 +63,22 @@ export type ClassSubmission = {
   fileName: string | null;
   status: string;
   aiProbability: number | null;
+  humanProbability: number | null;
+  confidenceScore: number | null;
   isAIGenerated: boolean | null;
   analysisDetails: Record<string, unknown> | null;
   submittedAt: string;
+  updatedAt: string;
+};
+
+export type SubmissionAnalysisResult = {
+  id: string;
+  status: string;
+  aiProbability: number | null;
+  humanProbability: number | null;
+  confidenceScore: number | null;
+  isAIGenerated: boolean | null;
+  analysisDetails: Record<string, unknown> | null;
   updatedAt: string;
 };
 
@@ -178,19 +193,43 @@ const mapEnrolledClass = (item: ApiClass): EnrolledClass => ({
   teacherName: item.teacher_name ?? "Unknown Teacher",
 });
 
+const asNumber = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return null;
+};
+
+const extractAnalysisNumbers = (details: Record<string, unknown> | null) => ({
+  humanProbability: asNumber(details?.humanProbability),
+  confidenceScore: asNumber(details?.confidenceScore),
+});
+
 const mapStudentSubmission = (item: ApiActivity): StudentActivitySubmission | null => {
   if (!item.submission_id) {
     return null;
   }
 
+  const analysisDetails = item.analysis_details ?? null;
+  const { humanProbability, confidenceScore } = extractAnalysisNumbers(analysisDetails);
+
   return {
     id: String(item.submission_id),
     status: item.submission_status ?? "pending",
-    aiProbability:
-      typeof item.ai_probability === "number" ? item.ai_probability : null,
+    aiProbability: asNumber(item.ai_probability),
+    humanProbability,
+    confidenceScore,
     isAIGenerated:
       typeof item.is_ai_generated === "boolean" ? item.is_ai_generated : null,
-    analysisDetails: item.analysis_details ?? null,
+    analysisDetails,
     submittedAt: item.submitted_at ?? null,
     contentText: item.content_text ?? null,
     fileName: item.file_name ?? null,
@@ -218,25 +257,32 @@ const mapStudent = (item: ApiStudent): EnrolledStudent => ({
   submissionCount: Number(item.submission_count ?? 0),
 });
 
-const mapSubmission = (item: ApiSubmission): ClassSubmission => ({
-  id: String(item.id),
-  activityId: String(item.activity_id),
-  activityTitle: item.activity_title,
-  submissionType: item.submission_type,
-  dueDate: item.due_date,
-  studentId: String(item.student_id),
-  studentName: item.student_name,
-  studentEmail: item.student_email,
-  contentText: item.content_text,
-  fileName: item.file_name,
-  status: item.status,
-  aiProbability: typeof item.ai_probability === "number" ? item.ai_probability : null,
-  isAIGenerated:
-    typeof item.is_ai_generated === "boolean" ? item.is_ai_generated : null,
-  analysisDetails: item.analysis_details,
-  submittedAt: item.submitted_at,
-  updatedAt: item.updated_at,
-});
+const mapSubmission = (item: ApiSubmission): ClassSubmission => {
+  const analysisDetails = item.analysis_details ?? null;
+  const { humanProbability, confidenceScore } = extractAnalysisNumbers(analysisDetails);
+
+  return {
+    id: String(item.id),
+    activityId: String(item.activity_id),
+    activityTitle: item.activity_title,
+    submissionType: item.submission_type,
+    dueDate: item.due_date,
+    studentId: String(item.student_id),
+    studentName: item.student_name,
+    studentEmail: item.student_email,
+    contentText: item.content_text,
+    fileName: item.file_name,
+    status: item.status,
+    aiProbability: asNumber(item.ai_probability),
+    humanProbability,
+    confidenceScore,
+    isAIGenerated:
+      typeof item.is_ai_generated === "boolean" ? item.is_ai_generated : null,
+    analysisDetails,
+    submittedAt: item.submitted_at,
+    updatedAt: item.updated_at,
+  };
+};
 
 export async function fetchTeacherClasses(): Promise<TeacherClass[]> {
   const payload = await request<{ classes: ApiClass[] }>("/mine");
@@ -298,6 +344,7 @@ export async function submitActivitySubmission(
   input: {
     contentText?: string;
     fileName?: string;
+    extractedText?: string;
   },
 ): Promise<StudentActivitySubmission> {
   const payload = await request<{
@@ -319,10 +366,9 @@ export async function submitActivitySubmission(
   return {
     id: String(payload.submission.id),
     status: payload.submission.status,
-    aiProbability:
-      typeof payload.submission.ai_probability === "number"
-        ? payload.submission.ai_probability
-        : null,
+    aiProbability: asNumber(payload.submission.ai_probability),
+    humanProbability: asNumber(payload.submission.analysis_details?.humanProbability),
+    confidenceScore: asNumber(payload.submission.analysis_details?.confidenceScore),
     isAIGenerated:
       typeof payload.submission.is_ai_generated === "boolean"
         ? payload.submission.is_ai_generated
@@ -346,6 +392,39 @@ export async function fetchClassSubmissions(
     `/${classId}/submissions`,
   );
   return (payload.submissions ?? []).map(mapSubmission);
+}
+
+export async function analyzeSingleSubmission(
+  submissionId: string,
+): Promise<SubmissionAnalysisResult> {
+  const payload = await request<{
+    submission: {
+      id: number;
+      status: string;
+      ai_probability: number | null;
+      is_ai_generated: boolean | null;
+      analysis_details: Record<string, unknown> | null;
+      updated_at: string;
+    };
+  }>(`/submissions/${submissionId}/analyze`, {
+    method: "POST",
+  });
+
+  const analysisDetails = payload.submission.analysis_details ?? null;
+
+  return {
+    id: String(payload.submission.id),
+    status: payload.submission.status,
+    aiProbability: asNumber(payload.submission.ai_probability),
+    humanProbability: asNumber(analysisDetails?.humanProbability),
+    confidenceScore: asNumber(analysisDetails?.confidenceScore),
+    isAIGenerated:
+      typeof payload.submission.is_ai_generated === "boolean"
+        ? payload.submission.is_ai_generated
+        : null,
+    analysisDetails,
+    updatedAt: payload.submission.updated_at,
+  };
 }
 
 export async function analyzeAllClassSubmissions(classId: string): Promise<number> {

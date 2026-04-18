@@ -15,14 +15,14 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     return (
       <Comp
         className={cn(
-          "inline-flex items-center justify-center whitespace-nowrap rounded-xl text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+          "theme-ring inline-flex items-center justify-center whitespace-nowrap rounded-xl text-sm font-medium transition-all duration-200 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50",
           {
-            "bg-blue-600 text-white hover:bg-blue-700 shadow-sm dark:bg-blue-600 dark:hover:bg-blue-700": variant === "default",
-            "bg-red-500 text-white hover:bg-red-600 dark:bg-red-600 dark:hover:bg-red-700": variant === "destructive",
-            "border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-900 dark:text-slate-100": variant === "outline",
-            "bg-gray-100 dark:bg-slate-800 text-gray-900 dark:text-slate-100 hover:bg-gray-200 dark:hover:bg-slate-700": variant === "secondary",
-            "hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-700 dark:text-slate-300": variant === "ghost",
-            "text-blue-600 dark:text-blue-400 underline-offset-4 hover:underline": variant === "link",
+            "bg-[linear-gradient(135deg,var(--app-accent),var(--app-accent-2))] text-white shadow-[var(--app-shadow)] hover:translate-y-[-1px]": variant === "default",
+            "bg-rose-500 text-white shadow-[var(--app-shadow)] hover:bg-rose-600 hover:translate-y-[-1px]": variant === "destructive",
+            "border theme-border bg-[color-mix(in_srgb,var(--app-surface)_92%,transparent)] text-[var(--app-text)] hover:bg-[color-mix(in_srgb,var(--app-accent)_8%,var(--app-surface))]": variant === "outline",
+            "bg-[color-mix(in_srgb,var(--app-accent)_14%,transparent)] text-[var(--app-accent)] hover:bg-[color-mix(in_srgb,var(--app-accent)_20%,transparent)]": variant === "secondary",
+            "text-[var(--app-muted)] hover:bg-[color-mix(in_srgb,var(--app-accent)_10%,transparent)] hover:text-[var(--app-text)]": variant === "ghost",
+            "text-[var(--app-accent)] underline-offset-4 hover:underline": variant === "link",
             "h-10 px-4 py-2": size === "default",
             "h-9 rounded-lg px-3": size === "sm",
             "h-12 rounded-xl px-8 text-base": size === "lg",

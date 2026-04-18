@@ -20,6 +20,7 @@ import {
   type StudentSection,
 } from "./components/StudentSidebar";
 import { StudentSubmissionModal } from "./components/StudentSubmissionModal";
+import { StudentSettingsPanel } from "./components/StudentSettingsPanel";
 
 const SIDEBAR_ITEMS = [
   { key: "home", label: "Home", icon: Home },
@@ -28,10 +29,7 @@ const SIDEBAR_ITEMS = [
 ] as const;
 
 export default function StudentScreen() {
-  const { user, logout } = useAuth();
-
-  const studentName = user?.name ?? "Student";
-  const studentEmail = user?.email ?? "";
+  const { logout } = useAuth();
 
   const [activeSection, setActiveSection] = useState<StudentSection>("home");
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -50,8 +48,6 @@ export default function StudentScreen() {
   const [essayContent, setEssayContent] = useState("");
   const [fileName, setFileName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 
   const selectedClass = useMemo(
     () => enrolledClasses.find((item) => item.id === selectedClassId) ?? null,
@@ -215,7 +211,7 @@ export default function StudentScreen() {
             <BookOpen className="mr-2 h-4 w-4" />
             Open Enrolled
           </Button>
-          <Button variant="outline" onClick={() => setJoinCode((prev) => prev)}>
+          <Button variant="outline" onClick={() => setActiveSection("enrolled")}>
             <Sparkles className="mr-2 h-4 w-4" />
             Join New Class
           </Button>
@@ -301,7 +297,7 @@ export default function StudentScreen() {
               <div>
                 <h3 className="text-xl font-bold text-[var(--app-text)]">{selectedClass.name}</h3>
                 <p className="text-sm theme-muted">
-                  Instructor: {selectedClass.teacherName} â€¢ Code: {selectedClass.code}
+                  Instructor: {selectedClass.teacherName} - Code: {selectedClass.code}
                 </p>
               </div>
             )}
@@ -323,7 +319,7 @@ export default function StudentScreen() {
                         <p className="font-semibold text-[var(--app-text)]">{activity.title}</p>
                         <p className="mt-1 text-sm theme-muted">{activity.description}</p>
                         <p className="mt-2 text-xs theme-muted">
-                          Instructor: {activity.instructor} â€¢ Due{" "}
+                          Instructor: {activity.instructor} - Due{" "}
                           {new Date(activity.dueDate).toLocaleString()}
                         </p>
                       </div>
@@ -338,6 +334,18 @@ export default function StudentScreen() {
                         {typeof activity.mySubmission.aiProbability === "number" && (
                           <p>
                             AI probability: {activity.mySubmission.aiProbability.toFixed(2)}%
+                          </p>
+                        )}
+                        {typeof activity.mySubmission.humanProbability === "number" && (
+                          <p>
+                            Human probability:{" "}
+                            {activity.mySubmission.humanProbability.toFixed(2)}%
+                          </p>
+                        )}
+                        {typeof activity.mySubmission.confidenceScore === "number" && (
+                          <p>
+                            Confidence score:{" "}
+                            {activity.mySubmission.confidenceScore.toFixed(2)}%
                           </p>
                         )}
                       </div>
@@ -359,46 +367,7 @@ export default function StudentScreen() {
   );
 
   const renderSettings = () => (
-    <Card className="theme-card max-w-2xl">
-      <CardContent className="space-y-5 p-5">
-        <div>
-          <p className="text-sm theme-muted">Student Account</p>
-          <h2 className="text-2xl font-bold text-[var(--app-text)]">Settings</h2>
-        </div>
-
-        <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)] p-4">
-          <p className="font-medium text-[var(--app-text)]">{studentName}</p>
-          <p className="text-sm theme-muted">{studentEmail}</p>
-        </div>
-
-        <div className="flex items-center justify-between rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)] p-4">
-          <div>
-            <p className="font-medium text-[var(--app-text)]">Notifications</p>
-            <p className="text-sm theme-muted">Assignment alerts and reminders.</p>
-          </div>
-          <button
-            onClick={() => setNotificationsEnabled((value) => !value)}
-            className={[
-              "theme-ring h-7 w-12 rounded-full p-1 transition-colors",
-              notificationsEnabled
-                ? "bg-[var(--app-accent)]"
-                : "bg-[color-mix(in_srgb,var(--app-muted)_35%,transparent)]",
-            ].join(" ")}
-          >
-            <span
-              className={[
-                "block h-5 w-5 rounded-full bg-white transition-transform",
-                notificationsEnabled ? "translate-x-5" : "translate-x-0",
-              ].join(" ")}
-            />
-          </button>
-        </div>
-
-        <Button variant="destructive" onClick={handleLogout}>
-          Logout
-        </Button>
-      </CardContent>
-    </Card>
+    <StudentSettingsPanel onAccountDeleted={() => (window.location.href = "/auth/login_screen")} />
   );
 
   return (

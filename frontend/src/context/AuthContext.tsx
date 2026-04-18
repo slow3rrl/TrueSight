@@ -5,6 +5,39 @@ import type { AuthContextType, AuthUser, UserRole } from "./auth-types";
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const API_URL = "http://localhost:5000/api/auth";
+const DARK_MODE_KEY = "darkMode";
+const LEGACY_THEME_KEY = "truesight-theme";
+
+const normalizeUser = (input: Record<string, unknown> | null): AuthUser | null => {
+  if (!input) return null;
+
+  return {
+    id: Number(input.id),
+    name: String(input.name ?? ""),
+    email: String(input.email ?? ""),
+    role: (input.role === "teacher" ? "teacher" : "student") as UserRole,
+    created_at: String(input.created_at ?? ""),
+    notifications:
+      typeof input.notifications === "boolean"
+        ? input.notifications
+        : typeof input.notifications_enabled === "boolean"
+          ? input.notifications_enabled
+          : true,
+  };
+};
+
+const getInitialDarkMode = () => {
+  const saved = localStorage.getItem(DARK_MODE_KEY);
+  if (saved === "true") return true;
+  if (saved === "false") return false;
+
+  const legacy = localStorage.getItem(LEGACY_THEME_KEY);
+  if (legacy === "dark") return true;
+  if (legacy === "light") return false;
+
+  // Dark is the default when no preference has been saved yet.
+  return true;
+};
 
 type AuthProviderProps = {
   children: React.ReactNode;
@@ -13,26 +46,57 @@ type AuthProviderProps = {
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(false);
-  const [darkMode, setDarkMode] = useState<boolean>(() => {
-    return localStorage.getItem("darkMode") === "true";
-  });
+  const [darkMode, setDarkMode] = useState<boolean>(getInitialDarkMode);
 
   useEffect(() => {
-    localStorage.setItem("darkMode", String(darkMode));
+    localStorage.setItem(DARK_MODE_KEY, String(darkMode));
+    localStorage.setItem(LEGACY_THEME_KEY, darkMode ? "dark" : "light");
 
     const root = document.documentElement;
     root.classList.toggle("dark", darkMode);
     root.style.colorScheme = darkMode ? "dark" : "light";
   }, [darkMode]);
 
+  useEffect(() => {
+    let active = true;
+
+    const hydrateSession = async () => {
+      try {
+        const response = await fetch(`${API_URL}/me`, {
+          method: "GET",
+          credentials: "include",
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = (await response.json()) as Record<string, unknown>;
+        const profile = normalizeUser((payload.user as Record<string, unknown>) ?? null);
+
+        if (active && profile) {
+          setUser(profile);
+        }
+      } catch {
+        // Silent by design; unauthenticated users should remain on auth routes.
+      }
+    };
+
+    void hydrateSession();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const toggleTheme = () => {
-    setDarkMode((prev) => !prev);
+    setDarkMode((previous) => !previous);
   };
 
   const signIn = async (email: string, password: string): Promise<void> => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/login`, {
+      const response = await fetch(`${API_URL}/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -41,61 +105,131 @@ export function AuthProvider({ children }: AuthProviderProps) {
         body: JSON.stringify({ email, password }),
       });
 
-      const data = await res.json();
+      const payload = (await response.json()) as Record<string, unknown>;
 
-      if (!res.ok) {
-        throw new Error(data.message || "Login failed");
+      if (!response.ok) {
+        throw new Error(
+          typeof payload.message === "string" ? payload.message : "Login failed.",
+        );
       }
 
-      setUser(data.user);
+      setUser(normalizeUser((payload.user as Record<string, unknown>) ?? null));
     } finally {
       setLoading(false);
     }
   };
 
   const signUp = async (
-  name: string,
-  email: string,
-  password: string,
-  role: UserRole
-): Promise<void> => {
-  setLoading(true);
-  try {
-    const res = await fetch(`${API_URL}/signup`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      credentials: "include",
-      body: JSON.stringify({ name, email, password, role }),
-    });
+    name: string,
+    email: string,
+    password: string,
+    role: UserRole,
+  ): Promise<void> => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/signup`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({ name, email, password, role }),
+      });
 
-    const data = await res.json();
+      const payload = (await response.json()) as Record<string, unknown>;
 
-    if (!res.ok) {
-      throw new Error(data.message || "Signup failed");
+      if (!response.ok) {
+        throw new Error(
+          typeof payload.message === "string" ? payload.message : "Signup failed.",
+        );
+      }
+    } finally {
+      setLoading(false);
     }
-
-    // Do not set the user here because signup should return to login first
-    // setUser(data.user);
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   const getMyProfile = async (): Promise<AuthUser | null> => {
-    const res = await fetch(`${API_URL}/me`, {
+    const response = await fetch(`${API_URL}/me`, {
       method: "GET",
       credentials: "include",
     });
 
-    const data = await res.json();
+    const payload = (await response.json()) as Record<string, unknown>;
 
-    if (!res.ok) {
-      throw new Error(data.message || "Failed to fetch profile");
+    if (!response.ok) {
+      throw new Error(
+        typeof payload.message === "string"
+          ? payload.message
+          : "Failed to fetch profile.",
+      );
     }
 
-    return data.user;
+    const profile = normalizeUser((payload.user as Record<string, unknown>) ?? null);
+    setUser(profile);
+    return profile;
+  };
+
+  const updateAccount = async (input: {
+    name: string;
+    email: string;
+    notifications: boolean;
+  }): Promise<AuthUser> => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/me`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(input),
+      });
+
+      const payload = (await response.json()) as Record<string, unknown>;
+
+      if (!response.ok) {
+        throw new Error(
+          typeof payload.message === "string"
+            ? payload.message
+            : "Failed to update account.",
+        );
+      }
+
+      const updated = normalizeUser((payload.user as Record<string, unknown>) ?? null);
+
+      if (!updated) {
+        throw new Error("Failed to parse updated account profile.");
+      }
+
+      setUser(updated);
+      return updated;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteAccount = async (): Promise<void> => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/me`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+
+      const payload = (await response.json()) as Record<string, unknown>;
+
+      if (!response.ok) {
+        throw new Error(
+          typeof payload.message === "string"
+            ? payload.message
+            : "Failed to delete account.",
+        );
+      }
+
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const logout = async (): Promise<void> => {
@@ -116,6 +250,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         signIn,
         signUp,
         getMyProfile,
+        updateAccount,
+        deleteAccount,
         logout,
       }}
     >

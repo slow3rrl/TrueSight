@@ -1,0 +1,191 @@
+import { useEffect, useState } from "react";
+import { AlertTriangle, Bell, Palette, Save, Trash2, UserRound } from "lucide-react";
+import toast from "react-hot-toast";
+import { Button } from "../../../components/ui/Button";
+import { Card, CardContent } from "../../../components/ui/Card";
+import { Input } from "../../../components/ui/Input";
+import { GlobalThemeToggle } from "../../../components/theme/GlobalThemeToggle";
+import { useAuth } from "../../../context/useAuth";
+
+type StudentSettingsPanelProps = {
+  onAccountDeleted: () => void;
+};
+
+const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+
+export function StudentSettingsPanel({ onAccountDeleted }: StudentSettingsPanelProps) {
+  const { user, updateAccount, deleteAccount, loading } = useAuth();
+
+  const [name, setName] = useState(user?.name ?? "");
+  const [email, setEmail] = useState(user?.email ?? "");
+  const [notifications, setNotifications] = useState(user?.notifications ?? true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => {
+    setName(user?.name ?? "");
+    setEmail(user?.email ?? "");
+    setNotifications(user?.notifications ?? true);
+  }, [user]);
+
+  const handleSave = async () => {
+    const nextName = name.trim();
+    const nextEmail = email.trim();
+
+    if (!nextName) {
+      toast.error("Name is required.");
+      return;
+    }
+
+    if (!isValidEmail(nextEmail)) {
+      toast.error("Please enter a valid email address.");
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      await updateAccount({
+        name: nextName,
+        email: nextEmail,
+        notifications,
+      });
+      toast.success("Account settings updated.");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to save account settings.";
+      toast.error(message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    const confirmed = window.confirm(
+      "Delete account permanently? This action cannot be undone.",
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setIsDeleting(true);
+      await deleteAccount();
+      toast.success("Account deleted.");
+      onAccountDeleted();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to delete account.";
+      toast.error(message);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  return (
+    <Card className="theme-card max-w-3xl">
+      <CardContent className="space-y-5 p-5">
+        <div>
+          <p className="text-sm theme-muted">Student Account</p>
+          <h2 className="text-2xl font-bold text-[var(--app-text)]">Settings</h2>
+        </div>
+
+        <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_96%,transparent)] p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <UserRound className="h-4 w-4 text-[var(--app-accent)]" />
+            <p className="font-semibold text-[var(--app-text)]">Profile</p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-[var(--app-text)]">Username</label>
+              <Input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Your display name"
+                className="bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)]"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-[var(--app-text)]">Email</label>
+              <Input
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="you@example.com"
+                className="bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)]"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_96%,transparent)] p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Bell className="h-4 w-4 text-[var(--app-accent)]" />
+            <p className="font-semibold text-[var(--app-text)]">Notifications</p>
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border theme-border bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)] px-3 py-2.5">
+            <div>
+              <p className="text-sm font-medium text-[var(--app-text)]">Class notifications</p>
+              <p className="text-xs theme-muted">Activity deadlines and feedback alerts</p>
+            </div>
+            <button
+              onClick={() => setNotifications((current) => !current)}
+              className={[
+                "theme-ring h-7 w-12 rounded-full p-1 transition-colors",
+                notifications
+                  ? "bg-[var(--app-accent)]"
+                  : "bg-[color-mix(in_srgb,var(--app-muted)_35%,transparent)]",
+              ].join(" ")}
+            >
+              <span
+                className={[
+                  "block h-5 w-5 rounded-full bg-white transition-transform",
+                  notifications ? "translate-x-5" : "translate-x-0",
+                ].join(" ")}
+              />
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_96%,transparent)] p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Palette className="h-4 w-4 text-[var(--app-accent)]" />
+            <p className="font-semibold text-[var(--app-text)]">Theme</p>
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border theme-border bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)] px-3 py-2.5">
+            <div>
+              <p className="text-sm font-medium text-[var(--app-text)]">Preferred Theme</p>
+              <p className="text-xs theme-muted">
+                Applied globally across student, teacher, login, and signup pages
+              </p>
+            </div>
+            <GlobalThemeToggle />
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <Button onClick={handleSave} disabled={isSaving || loading}>
+            <Save className="mr-2 h-4 w-4" />
+            {isSaving ? "Saving..." : "Save Settings"}
+          </Button>
+
+          <Button
+            variant="destructive"
+            onClick={handleDeleteAccount}
+            disabled={isDeleting || loading}
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            {isDeleting ? "Deleting..." : "Delete Account"}
+          </Button>
+        </div>
+
+        <div className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+          <p className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4" />
+            Deleting your account removes your enrollment, submissions, and profile data.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
