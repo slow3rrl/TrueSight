@@ -53,6 +53,8 @@ export type EnrolledStudent = {
 export type ClassSubmission = {
   id: string;
   activityId: string;
+  classId: string | null;
+  className: string | null;
   activityTitle: string;
   submissionType: ActivitySubmissionType;
   dueDate: string;
@@ -126,6 +128,8 @@ type ApiStudent = {
 type ApiSubmission = {
   id: number;
   activity_id: number;
+  class_id?: number;
+  class_name?: string;
   activity_title: string;
   submission_type: ActivitySubmissionType;
   due_date: string;
@@ -264,6 +268,8 @@ const mapSubmission = (item: ApiSubmission): ClassSubmission => {
   return {
     id: String(item.id),
     activityId: String(item.activity_id),
+    classId: typeof item.class_id === "number" ? String(item.class_id) : null,
+    className: item.class_name ?? null,
     activityTitle: item.activity_title,
     submissionType: item.submission_type,
     dueDate: item.due_date,
@@ -392,6 +398,16 @@ export async function fetchClassSubmissions(
     `/${classId}/submissions`,
   );
   return (payload.submissions ?? []).map(mapSubmission);
+}
+
+export async function fetchSubmissionDetail(
+  submissionId: string,
+): Promise<ClassSubmission> {
+  const payload = await request<{ submission: ApiSubmission }>(
+    `/submissions/${submissionId}`,
+  );
+
+  return mapSubmission(payload.submission);
 }
 
 export async function analyzeSingleSubmission(

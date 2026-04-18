@@ -34,6 +34,8 @@ type TeacherClassManagerModalProps = {
   onClose: () => void;
   onAnalyzeAll: () => void;
   onAnalyzeSubmission: (submissionId: string) => void;
+  onOpenSubmissionPage: (submissionId: string) => void;
+  onOpenAnalysisPage: (submissionId: string) => void;
   onSubmitActivity: (event: React.FormEvent) => void;
   onChangeActivityForm: (patch: Partial<ActivityFormState>) => void;
   onToggleSubmission: (submissionId: string) => void;
@@ -55,6 +57,8 @@ export function TeacherClassManagerModal({
   onClose,
   onAnalyzeAll,
   onAnalyzeSubmission,
+  onOpenSubmissionPage,
+  onOpenAnalysisPage,
   onSubmitActivity,
   onChangeActivityForm,
   onToggleSubmission,
@@ -285,6 +289,22 @@ export function TeacherClassManagerModal({
                                     {analyzingSubmissionId === submission.id
                                       ? "Analyzing..."
                                       : "Analyze"}
+                                  </Button>
+
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => onOpenSubmissionPage(submission.id)}
+                                  >
+                                    View Submission Page
+                                  </Button>
+
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => onOpenAnalysisPage(submission.id)}
+                                  >
+                                    View Analysis Report
                                   </Button>
 
                                   <button

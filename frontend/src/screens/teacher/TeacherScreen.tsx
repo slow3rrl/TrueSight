@@ -685,6 +685,12 @@ export default function TeacherScreen() {
         onClose={() => setIsClassManagerOpen(false)}
         onAnalyzeAll={handleAnalyzeAll}
         onAnalyzeSubmission={(submissionId) => void handleAnalyzeSubmission(submissionId)}
+        onOpenSubmissionPage={(submissionId) =>
+          navigate(`/teacher/submissions/${submissionId}`)
+        }
+        onOpenAnalysisPage={(submissionId) =>
+          navigate(`/teacher/submissions/${submissionId}/analysis`)
+        }
         onSubmitActivity={handleCreateActivity}
         onChangeActivityForm={(patch) =>
           setActivityForm((previous) => ({

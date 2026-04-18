@@ -1,4 +1,3 @@
-import React from "react"
 import { Outlet, useLocation, useNavigate } from "react-router"
 import { ChevronLeft } from "lucide-react"
 

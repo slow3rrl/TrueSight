@@ -763,6 +763,48 @@ router.get("/:classId/submissions", protect, async (req, res) => {
   }
 });
 
+router.get("/submissions/:submissionId", protect, async (req, res) => {
+  try {
+    if (req.user.role !== "teacher") {
+      return res.status(403).json({ message: "Only teachers can view submissions." });
+    }
+
+    const submissionId = Number(req.params.submissionId);
+
+    if (!Number.isFinite(submissionId)) {
+      return res.status(400).json({ message: "Invalid submission id." });
+    }
+
+    const submission = await pool.query(
+      `SELECT s.id, s.activity_id, a.class_id, c.name AS class_name,
+              a.title AS activity_title, a.submission_type, a.due_date,
+              s.student_id, u.name AS student_name, u.email AS student_email,
+              s.content_text, s.file_name, s.status, s.ai_probability, s.is_ai_generated,
+              s.analysis_details, s.submitted_at, s.updated_at
+       FROM submissions s
+       INNER JOIN activities a ON a.id = s.activity_id
+       INNER JOIN classes c ON c.id = a.class_id
+       INNER JOIN users u ON u.id = s.student_id
+       WHERE s.id = $1 AND c.teacher_id = $2
+       LIMIT 1`,
+      [submissionId, req.user.id],
+    );
+
+    if (submission.rows.length === 0) {
+      return res.status(404).json({
+        message: "Submission not found or not accessible in your classes.",
+      });
+    }
+
+    return res.status(200).json({ submission: submission.rows[0] });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Failed to load submission.",
+      error: error.message,
+    });
+  }
+});
+
 router.post("/submissions/:submissionId/analyze", protect, async (req, res) => {
   try {
     if (req.user.role !== "teacher") {

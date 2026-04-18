@@ -6,6 +6,7 @@ export {
   fetchClassActivities,
   fetchClassStudents,
   fetchClassSubmissions,
+  fetchSubmissionDetail,
   fetchTeacherClasses,
   type ActivitySubmissionType,
   type ClassActivity,

@@ -3,6 +3,8 @@ import LoginScreen from "./auth/LoginScreen";
 import SignupScreen from "./auth/SignupScreen";
 import StudentScreen from "./screens/student/StudentScreen";
 import TeacherScreen from "./screens/teacher/TeacherScreen";
+import SubmissionDetailPage from "./screens/teacher/SubmissionDetailPage";
+import SubmissionAnalysisReportPage from "./screens/teacher/SubmissionAnalysisReportPage";
 import "./index.css";
 export default function App() {
   return (
@@ -19,6 +21,11 @@ export default function App() {
         <Route
           path="/teacher/teacher_screen"
           element={<Navigate to="/teacher/teacher_screen/home" replace />}
+        />
+        <Route path="/teacher/submissions/:submissionId" element={<SubmissionDetailPage />} />
+        <Route
+          path="/teacher/submissions/:submissionId/analysis"
+          element={<SubmissionAnalysisReportPage />}
         />
         <Route path="/teacher/teacher_screen/:section" element={<TeacherScreen />} />
 

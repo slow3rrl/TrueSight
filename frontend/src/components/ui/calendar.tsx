@@ -7,6 +7,11 @@ import { DayPicker } from "react-day-picker";
 import { cn } from "./utils";
 import { buttonVariants } from "./btn";
 
+type DayPickerComponents = NonNullable<
+  React.ComponentProps<typeof DayPicker>["components"]
+>;
+type ChevronProps = Parameters<NonNullable<DayPickerComponents["Chevron"]>>[0];
+
 function Calendar({
   className,
   classNames,
@@ -60,12 +65,12 @@ function Calendar({
         ...classNames,
       }}
       components={{
-        IconLeft: ({ className, ...props }: { className?: string; [key: string]: any }) => (
-          <ChevronLeft className={cn("size-4", className)} {...props} />
-        ),
-        IconRight: ({ className, ...props }: { className?: string; [key: string]: any }) => (
-          <ChevronRight className={cn("size-4", className)} {...props} />
-        ),
+        Chevron: ({ className, orientation, ...props }: ChevronProps) =>
+          orientation === "left" ? (
+            <ChevronLeft className={cn("size-4", className)} {...props} />
+          ) : (
+            <ChevronRight className={cn("size-4", className)} {...props} />
+          ),
       }}
       {...props}
     />

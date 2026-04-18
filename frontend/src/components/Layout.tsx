@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router';
 import { useAppContext } from '../context/AppContext';
 import { BookOpen, Settings, GraduationCap, Menu, Home } from 'lucide-react';
