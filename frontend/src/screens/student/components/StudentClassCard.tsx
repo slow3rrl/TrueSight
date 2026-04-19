@@ -30,7 +30,7 @@ export function StudentClassCard({
           <p className="font-semibold text-[var(--app-text)]">{classroom.name}</p>
           <p className="mt-1 text-xs theme-muted">Code: {classroom.code}</p>
         </div>
-        <span className="rounded-full bg-[color-mix(in_srgb,var(--app-accent)_18%,transparent)] px-2 py-1 text-xs text-[var(--app-accent)]">
+        <span className="inline-flex min-w-fit shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-[color-mix(in_srgb,var(--app-accent)_18%,transparent)] px-2.5 py-1 text-xs font-medium leading-none text-[var(--app-accent)]">
           {classroom.assignments} activities
         </span>
       </div>

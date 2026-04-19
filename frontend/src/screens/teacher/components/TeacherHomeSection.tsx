@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { BookOpen, CalendarClock, Plus, Users } from "lucide-react";
+import { BookOpen, CalendarClock, ClipboardList, Plus, Users } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card, CardContent } from "../../../components/ui/Card";
 import type { TeacherSection } from "./TeacherSidebar";
@@ -36,23 +36,46 @@ export function TeacherHomeSection({
           dashboard.
         </p>
 
-        <div className="mt-6 flex flex-wrap gap-3">
-          <Button onClick={onCreateClass}>
+        <div className="mt-6 space-y-3">
+          <Button onClick={onCreateClass} className="w-full sm:w-auto">
             <Plus className="mr-2 h-4 w-4" />
             Create Class
           </Button>
-          <Button variant="outline" onClick={() => onOpenSection("classes")}>
-            <BookOpen className="mr-2 h-4 w-4" />
-            View Classes
-          </Button>
-          <Button variant="outline" onClick={() => onOpenSection("students")}>
-            <Users className="mr-2 h-4 w-4" />
-            View Students
-          </Button>
-          <Button variant="outline" onClick={() => onOpenSection("upcoming")}>
-            <CalendarClock className="mr-2 h-4 w-4" />
-            View Upcoming
-          </Button>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              onClick={() => onOpenSection("classes")}
+            >
+              <BookOpen className="mr-2 h-4 w-4" />
+              View Classes
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              onClick={() => onOpenSection("students")}
+            >
+              <Users className="mr-2 h-4 w-4" />
+              View Students
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              onClick={() => onOpenSection("activities")}
+            >
+              <ClipboardList className="mr-2 h-4 w-4" />
+              View Activities
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              onClick={() => onOpenSection("upcoming")}
+            >
+              <CalendarClock className="mr-2 h-4 w-4" />
+              View Upcoming
+            </Button>
+          </div>
         </div>
       </motion.div>
 
