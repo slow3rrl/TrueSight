@@ -10,6 +10,11 @@ const ensureClassroomSchema = async () => {
   if (schemaReady) return;
 
   await pool.query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS profile_image_url TEXT
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS classes (
       id SERIAL PRIMARY KEY,
       name VARCHAR(255) NOT NULL,
@@ -78,7 +83,7 @@ const protect = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     const user = await pool.query(
-      "SELECT id, name, email, role FROM users WHERE id = $1",
+      "SELECT id, name, email, role, profile_image_url FROM users WHERE id = $1",
       [decoded.id],
     );
 
@@ -314,6 +319,11 @@ const analyzeText = async (text) => {
   return buildAnalysisSummary(runHeuristicAnalysis(text));
 };
 
+const getStudentIdentityKey = (name, email) =>
+  `${String(email ?? "").trim().toLowerCase()}::${String(name ?? "")
+    .trim()
+    .toLowerCase()}`;
+
 const getAccessibleClass = async (classId, user) => {
   if (user.role === "teacher") {
     const teacherClass = await pool.query(
@@ -346,10 +356,12 @@ router.get("/mine", protect, async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT id, name, code, description, teacher_id, student_count, assignment_count, created_at
-       FROM classes
-       WHERE teacher_id = $1
-       ORDER BY created_at DESC`,
+      `SELECT c.id, c.name, c.code, c.description, c.teacher_id, c.student_count, c.assignment_count, c.created_at,
+              u.name AS teacher_name, u.profile_image_url AS teacher_profile_image_url
+       FROM classes c
+       INNER JOIN users u ON u.id = c.teacher_id
+       WHERE c.teacher_id = $1
+       ORDER BY c.created_at DESC`,
       [req.user.id],
     );
 
@@ -357,6 +369,129 @@ router.get("/mine", protect, async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       message: "Failed to load classes.",
+      error: error.message,
+    });
+  }
+});
+
+router.get("/teacher/overview", protect, async (req, res) => {
+  try {
+    if (req.user.role !== "teacher") {
+      return res.status(403).json({ message: "Only teachers can view this overview." });
+    }
+
+    const [classesResult, activitiesResult, enrollmentsResult] = await Promise.all([
+      pool.query(
+        `SELECT c.id, c.name, c.code, c.description, c.teacher_id, c.student_count, c.assignment_count, c.created_at,
+                u.name AS teacher_name, u.profile_image_url AS teacher_profile_image_url
+         FROM classes c
+         INNER JOIN users u ON u.id = c.teacher_id
+         WHERE c.teacher_id = $1
+         ORDER BY c.created_at DESC`,
+        [req.user.id],
+      ),
+      pool.query(
+        `SELECT a.id, a.class_id, c.name AS class_name,
+                a.title, a.instructor, a.description, a.submission_type, a.due_date, a.created_at,
+                COALESCE((SELECT COUNT(*) FROM submissions s WHERE s.activity_id = a.id), 0)::int AS submission_count
+         FROM activities a
+         INNER JOIN classes c ON c.id = a.class_id
+         WHERE c.teacher_id = $1
+         ORDER BY a.created_at DESC`,
+        [req.user.id],
+      ),
+      pool.query(
+        `SELECT ce.class_id, ce.joined_at, u.id, u.name, u.email, u.profile_image_url,
+                COALESCE((
+                  SELECT COUNT(*)
+                  FROM submissions s
+                  INNER JOIN activities a ON a.id = s.activity_id
+                  WHERE a.class_id = ce.class_id AND s.student_id = u.id
+                ), 0)::int AS submission_count
+         FROM class_enrollments ce
+         INNER JOIN classes c ON c.id = ce.class_id
+         INNER JOIN users u ON u.id = ce.student_id
+         WHERE c.teacher_id = $1
+         ORDER BY ce.joined_at ASC`,
+        [req.user.id],
+      ),
+    ]);
+
+    const dedupedStudents = new Map();
+
+    for (const enrollment of enrollmentsResult.rows) {
+      const key = getStudentIdentityKey(enrollment.name, enrollment.email);
+      const joinedAt = enrollment.joined_at;
+
+      if (!dedupedStudents.has(key)) {
+        dedupedStudents.set(key, {
+          id: enrollment.id,
+          name: enrollment.name,
+          email: enrollment.email,
+          profile_image_url: enrollment.profile_image_url ?? null,
+          first_joined_at: joinedAt,
+          last_joined_at: joinedAt,
+          submission_count: Number(enrollment.submission_count ?? 0),
+          class_ids: new Set([Number(enrollment.class_id)]),
+        });
+
+        continue;
+      }
+
+      const existing = dedupedStudents.get(key);
+      existing.class_ids.add(Number(enrollment.class_id));
+      existing.submission_count += Number(enrollment.submission_count ?? 0);
+
+      if (
+        new Date(joinedAt).getTime() <
+        new Date(existing.first_joined_at).getTime()
+      ) {
+        existing.first_joined_at = joinedAt;
+      }
+
+      if (
+        new Date(joinedAt).getTime() >
+        new Date(existing.last_joined_at).getTime()
+      ) {
+        existing.last_joined_at = joinedAt;
+      }
+
+      // Prefer any available profile image from duplicate records.
+      if (!existing.profile_image_url && enrollment.profile_image_url) {
+        existing.profile_image_url = enrollment.profile_image_url;
+      }
+    }
+
+    const students = Array.from(dedupedStudents.values())
+      .map((student) => ({
+        id: student.id,
+        name: student.name,
+        email: student.email,
+        profile_image_url: student.profile_image_url,
+        first_joined_at: student.first_joined_at,
+        last_joined_at: student.last_joined_at,
+        class_count: student.class_ids.size,
+        submission_count: student.submission_count,
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    const now = Date.now();
+    const upcoming = [...activitiesResult.rows]
+      .filter((activity) => new Date(activity.due_date).getTime() >= now)
+      .sort(
+        (left, right) =>
+          new Date(left.due_date).getTime() - new Date(right.due_date).getTime(),
+      );
+
+    return res.status(200).json({
+      classes: classesResult.rows,
+      students,
+      activities: activitiesResult.rows,
+      upcoming,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Failed to load teacher overview.",
       error: error.message,
     });
   }
@@ -412,9 +547,11 @@ router.post("/join", protect, async (req, res) => {
     }
 
     const classResult = await pool.query(
-      `SELECT id, name, code, description, teacher_id, student_count, assignment_count, created_at
-       FROM classes
-       WHERE UPPER(code) = UPPER($1)
+      `SELECT c.id, c.name, c.code, c.description, c.teacher_id, c.student_count, c.assignment_count, c.created_at,
+              u.name AS teacher_name, u.profile_image_url AS teacher_profile_image_url
+       FROM classes c
+       INNER JOIN users u ON u.id = c.teacher_id
+       WHERE UPPER(c.code) = UPPER($1)
        LIMIT 1`,
       [code],
     );
@@ -467,7 +604,7 @@ router.get("/enrolled", protect, async (req, res) => {
 
     const result = await pool.query(
       `SELECT c.id, c.name, c.code, c.description, c.teacher_id, c.student_count, c.assignment_count, c.created_at,
-              ce.joined_at, u.name AS teacher_name
+              ce.joined_at, u.name AS teacher_name, u.profile_image_url AS teacher_profile_image_url
        FROM class_enrollments ce
        INNER JOIN classes c ON c.id = ce.class_id
        INNER JOIN users u ON u.id = c.teacher_id
@@ -697,7 +834,7 @@ router.get("/:classId/students", protect, async (req, res) => {
     }
 
     const students = await pool.query(
-      `SELECT u.id, u.name, u.email, ce.joined_at,
+      `SELECT u.id, u.name, u.email, u.profile_image_url, ce.joined_at,
               COALESCE((
                 SELECT COUNT(*)
                 FROM submissions s

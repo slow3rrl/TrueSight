@@ -6,6 +6,12 @@ import { Card, CardContent } from "../../../components/ui/Card";
 import { Input } from "../../../components/ui/Input";
 import { GlobalThemeToggle } from "../../../components/theme/GlobalThemeToggle";
 import { useAuth } from "../../../context/useAuth";
+import {
+  isSupportedProfileImageType,
+  MAX_PROFILE_IMAGE_SIZE_BYTES,
+  readFileAsDataUrl,
+} from "../../../utils/profileImage";
+import { StudentProfileImageField } from "./StudentProfileImageField";
 
 type StudentSettingsPanelProps = {
   onAccountDeleted: () => void;
@@ -18,6 +24,9 @@ export function StudentSettingsPanel({ onAccountDeleted }: StudentSettingsPanelP
 
   const [name, setName] = useState(user?.name ?? "");
   const [email, setEmail] = useState(user?.email ?? "");
+  const [profileImageUrl, setProfileImageUrl] = useState<string | null>(
+    user?.profileImageUrl ?? null,
+  );
   const [notifications, setNotifications] = useState(user?.notifications ?? true);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -25,8 +34,39 @@ export function StudentSettingsPanel({ onAccountDeleted }: StudentSettingsPanelP
   useEffect(() => {
     setName(user?.name ?? "");
     setEmail(user?.email ?? "");
+    setProfileImageUrl(user?.profileImageUrl ?? null);
     setNotifications(user?.notifications ?? true);
   }, [user]);
+
+  const handleProfileImageChange = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    if (!isSupportedProfileImageType(file.type)) {
+      toast.error("Unsupported image type. Use PNG, JPG, WEBP, or GIF.");
+      return;
+    }
+
+    if (file.size > MAX_PROFILE_IMAGE_SIZE_BYTES) {
+      toast.error("Image is too large. Maximum file size is 2MB.");
+      return;
+    }
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setProfileImageUrl(dataUrl);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to process image.";
+      toast.error(message);
+    }
+  };
 
   const handleSave = async () => {
     const nextName = name.trim();
@@ -47,6 +87,7 @@ export function StudentSettingsPanel({ onAccountDeleted }: StudentSettingsPanelP
       await updateAccount({
         name: nextName,
         email: nextEmail,
+        profileImageUrl,
         notifications,
       });
       toast.success("Account settings updated.");
@@ -93,6 +134,13 @@ export function StudentSettingsPanel({ onAccountDeleted }: StudentSettingsPanelP
             <UserRound className="h-4 w-4 text-[var(--app-accent)]" />
             <p className="font-semibold text-[var(--app-text)]">Profile</p>
           </div>
+
+          <StudentProfileImageField
+            name={name || user?.name || "Student"}
+            profileImageUrl={profileImageUrl}
+            onSelectImage={handleProfileImageChange}
+            onRemoveImage={() => setProfileImageUrl(null)}
+          />
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">

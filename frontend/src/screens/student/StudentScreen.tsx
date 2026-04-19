@@ -19,6 +19,7 @@ import {
   StudentSidebar,
   type StudentSection,
 } from "./components/StudentSidebar";
+import { StudentEnrolledSection } from "./components/StudentEnrolledSection";
 import { StudentSubmissionModal } from "./components/StudentSubmissionModal";
 import { StudentSettingsPanel } from "./components/StudentSettingsPanel";
 
@@ -200,10 +201,9 @@ export default function StudentScreen() {
         animate={{ opacity: 1, y: 0 }}
         className="theme-surface rounded-3xl border border-dashed theme-border px-6 py-7 sm:px-8"
       >
-        <h1 className="theme-title text-3xl font-extrabold sm:text-4xl">ArtSense AI</h1>
+        <h1 className="theme-title text-3xl font-extrabold sm:text-4xl">TrueSight</h1>
         <p className="mt-4 max-w-3xl text-base theme-muted sm:text-lg">
-          Advanced machine learning analysis to distinguish between human-created and
-          AI-generated coursework.
+          An AI-powered tool desgined for academic integrity in Buenavista Community College. Join your classes, view activities, and submit your work with confidence.
         </p>
 
         <div className="mt-6 flex flex-wrap gap-3">
@@ -272,98 +272,19 @@ export default function StudentScreen() {
   );
 
   const renderEnrolled = () => (
-    <div className="space-y-5">
-      <div>
-        <h2 className="text-2xl font-bold text-[var(--app-text)]">Enrolled Classes</h2>
-        <p className="text-sm theme-muted">
-          Select a class to view teacher activities and submit your work.
-        </p>
-      </div>
-
-      {isLoadingClasses ? (
-        <Card className="theme-card">
-          <CardContent className="p-5 text-sm theme-muted">Loading classes...</CardContent>
-        </Card>
-      ) : enrolledClasses.length === 0 ? (
-        <Card className="theme-card">
-          <CardContent className="p-6 text-sm theme-muted">
-            You are not enrolled in any classes yet. Use a class code to join.
-          </CardContent>
-        </Card>
-      ) : (
-        <Card className="theme-card">
-          <CardContent className="space-y-4 p-5">
-            {selectedClass && (
-              <div>
-                <h3 className="text-xl font-bold text-[var(--app-text)]">{selectedClass.name}</h3>
-                <p className="text-sm theme-muted">
-                  Instructor: {selectedClass.teacherName} - Code: {selectedClass.code}
-                </p>
-              </div>
-            )}
-
-            {isLoadingActivities ? (
-              <p className="text-sm theme-muted">Loading activities...</p>
-            ) : activities.length === 0 ? (
-              <p className="text-sm theme-muted">No activities available yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {activities.map((activity) => (
-                  <motion.div
-                    key={activity.id}
-                    whileHover={{ scale: 1.01 }}
-                    className="rounded-2xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)] p-4 transition-all"
-                  >
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <p className="font-semibold text-[var(--app-text)]">{activity.title}</p>
-                        <p className="mt-1 text-sm theme-muted">{activity.description}</p>
-                        <p className="mt-2 text-xs theme-muted">
-                          Instructor: {activity.instructor} - Due{" "}
-                          {new Date(activity.dueDate).toLocaleString()}
-                        </p>
-                      </div>
-                      <span className="rounded-full bg-[color-mix(in_srgb,var(--app-accent)_18%,transparent)] px-2 py-1 text-xs text-[var(--app-accent)]">
-                        {activity.submissionType === "essay" ? "Essay" : "File"}
-                      </span>
-                    </div>
-
-                    {activity.mySubmission && (
-                      <div className="mt-3 rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)] px-3 py-2 text-xs theme-muted">
-                        <p>Status: {activity.mySubmission.status}</p>
-                        {typeof activity.mySubmission.aiProbability === "number" && (
-                          <p>
-                            AI probability: {activity.mySubmission.aiProbability.toFixed(2)}%
-                          </p>
-                        )}
-                        {typeof activity.mySubmission.humanProbability === "number" && (
-                          <p>
-                            Human probability:{" "}
-                            {activity.mySubmission.humanProbability.toFixed(2)}%
-                          </p>
-                        )}
-                        {typeof activity.mySubmission.confidenceScore === "number" && (
-                          <p>
-                            Confidence score:{" "}
-                            {activity.mySubmission.confidenceScore.toFixed(2)}%
-                          </p>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="mt-3">
-                      <Button size="sm" onClick={() => openSubmissionModal(activity)}>
-                        {activity.mySubmission ? "Resubmit Work" : "Submit Work"}
-                      </Button>
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-    </div>
+    <StudentEnrolledSection
+      enrolledClasses={enrolledClasses}
+      selectedClassId={selectedClassId}
+      selectedClass={selectedClass}
+      activities={activities}
+      isLoadingClasses={isLoadingClasses}
+      isLoadingActivities={isLoadingActivities}
+      onSelectClass={(classId) => {
+        setSelectedClassId(classId);
+        setActiveSection("enrolled");
+      }}
+      onOpenSubmissionModal={openSubmissionModal}
+    />
   );
 
   const renderSettings = () => (

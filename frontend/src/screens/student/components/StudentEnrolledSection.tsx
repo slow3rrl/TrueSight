@@ -1,0 +1,142 @@
+import { motion } from "framer-motion";
+import { Button } from "../../../components/ui/Button";
+import { Card, CardContent } from "../../../components/ui/Card";
+import type {
+  ClassActivity,
+  EnrolledClass,
+} from "../services/studentClassroomService";
+import { StudentClassCard } from "./StudentClassCard";
+
+type StudentEnrolledSectionProps = {
+  enrolledClasses: EnrolledClass[];
+  selectedClassId: string | null;
+  selectedClass: EnrolledClass | null;
+  activities: ClassActivity[];
+  isLoadingClasses: boolean;
+  isLoadingActivities: boolean;
+  onSelectClass: (classId: string) => void;
+  onOpenSubmissionModal: (activity: ClassActivity) => void;
+};
+
+export function StudentEnrolledSection({
+  enrolledClasses,
+  selectedClassId,
+  selectedClass,
+  activities,
+  isLoadingClasses,
+  isLoadingActivities,
+  onSelectClass,
+  onOpenSubmissionModal,
+}: StudentEnrolledSectionProps) {
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-2xl font-bold text-[var(--app-text)]">Enrolled Classes</h2>
+        <p className="text-sm theme-muted">
+          Browse all your classes and submit activities per class.
+        </p>
+      </div>
+
+      {isLoadingClasses ? (
+        <Card className="theme-card">
+          <CardContent className="p-5 text-sm theme-muted">Loading classes...</CardContent>
+        </Card>
+      ) : enrolledClasses.length === 0 ? (
+        <Card className="theme-card">
+          <CardContent className="p-6 text-sm theme-muted">
+            You are not enrolled in any classes yet. Use a class code to join.
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-[340px_1fr]">
+          <Card className="theme-card">
+            <CardContent className="space-y-3 p-4">
+              {enrolledClasses.map((classroom) => (
+                <StudentClassCard
+                  key={classroom.id}
+                  classroom={classroom}
+                  selected={selectedClassId === classroom.id}
+                  onSelect={onSelectClass}
+                />
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card className="theme-card">
+            <CardContent className="space-y-4 p-5">
+              {selectedClass ? (
+                <div>
+                  <h3 className="text-xl font-bold text-[var(--app-text)]">{selectedClass.name}</h3>
+                  <p className="text-sm theme-muted">
+                    Instructor: {selectedClass.teacherName} - Code: {selectedClass.code}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm theme-muted">Select a class to view activities.</p>
+              )}
+
+              {isLoadingActivities ? (
+                <p className="text-sm theme-muted">Loading activities...</p>
+              ) : activities.length === 0 ? (
+                <p className="text-sm theme-muted">No activities available yet.</p>
+              ) : (
+                <div className="space-y-3">
+                  {activities.map((activity) => (
+                    <motion.div
+                      key={activity.id}
+                      whileHover={{ scale: 1.01 }}
+                      className="rounded-2xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)] p-4 transition-all"
+                    >
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="font-semibold text-[var(--app-text)]">{activity.title}</p>
+                          <p className="mt-1 text-sm theme-muted">{activity.description}</p>
+                          <p className="mt-2 text-xs theme-muted">
+                            Instructor: {activity.instructor} - Due{" "}
+                            {new Date(activity.dueDate).toLocaleString()}
+                          </p>
+                        </div>
+                        <span className="rounded-full bg-[color-mix(in_srgb,var(--app-accent)_18%,transparent)] px-2 py-1 text-xs text-[var(--app-accent)]">
+                          {activity.submissionType === "essay" ? "Essay" : "File"}
+                        </span>
+                      </div>
+
+                      {activity.mySubmission && (
+                        <div className="mt-3 rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)] px-3 py-2 text-xs theme-muted">
+                          <p>Status: {activity.mySubmission.status}</p>
+                          {typeof activity.mySubmission.aiProbability === "number" && (
+                            <p>
+                              AI probability: {activity.mySubmission.aiProbability.toFixed(2)}%
+                            </p>
+                          )}
+                          {typeof activity.mySubmission.humanProbability === "number" && (
+                            <p>
+                              Human probability:{" "}
+                              {activity.mySubmission.humanProbability.toFixed(2)}%
+                            </p>
+                          )}
+                          {typeof activity.mySubmission.confidenceScore === "number" && (
+                            <p>
+                              Confidence score:{" "}
+                              {activity.mySubmission.confidenceScore.toFixed(2)}%
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="mt-3">
+                        <Button size="sm" onClick={() => onOpenSubmissionModal(activity)}>
+                          {activity.mySubmission ? "Resubmit Work" : "Submit Work"}
+                        </Button>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}

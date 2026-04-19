@@ -6,6 +6,7 @@ import pool from "../config/db.js";
 const router = express.Router();
 
 let authSchemaReady = false;
+const MAX_PROFILE_IMAGE_LENGTH = 2_000_000;
 
 const cookieOptions = {
   httpOnly: true,
@@ -22,6 +23,11 @@ const generateToken = (id) => {
 
 const ensureAuthSchema = async () => {
   if (authSchemaReady) return;
+
+  await pool.query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS profile_image_url TEXT
+  `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS user_preferences (
@@ -49,6 +55,7 @@ const ensureUserPreferences = async (userId, notificationsEnabled = true) => {
 const getUserProfileById = async (userId) => {
   const user = await pool.query(
     `SELECT u.id, u.name, u.email, u.role, u.created_at,
+            u.profile_image_url,
             COALESCE(up.notifications_enabled, TRUE) AS notifications
      FROM users u
      LEFT JOIN user_preferences up ON up.user_id = u.id
@@ -149,6 +156,7 @@ router.post("/login", async (req, res) => {
 
     const user = await pool.query(
       `SELECT u.id, u.name, u.email, u.password, u.role, u.created_at,
+              u.profile_image_url,
               COALESCE(up.notifications_enabled, TRUE) AS notifications
        FROM users u
        LEFT JOIN user_preferences up ON up.user_id = u.id
@@ -184,6 +192,7 @@ router.post("/login", async (req, res) => {
         email: userData.email,
         role: userData.role,
         created_at: userData.created_at,
+        profile_image_url: userData.profile_image_url ?? null,
         notifications: Boolean(userData.notifications),
       },
     });
@@ -205,19 +214,28 @@ router.patch("/me", protect, async (req, res) => {
   try {
     await ensureAuthSchema();
 
-    const { name, email, notifications } = req.body;
+    const { name, email, notifications, profileImageUrl } = req.body;
     const hasName = typeof name === "string";
     const hasEmail = typeof email === "string";
     const hasNotifications = typeof notifications === "boolean";
+    const hasProfileImage =
+      typeof profileImageUrl === "string" || profileImageUrl === null;
 
-    if (!hasName && !hasEmail && !hasNotifications) {
+    if (!hasName && !hasEmail && !hasNotifications && !hasProfileImage) {
       return res.status(400).json({
-        message: "Provide at least one field to update: name, email, or notifications.",
+        message:
+          "Provide at least one field to update: name, email, profile image, or notifications.",
       });
     }
 
     const nextName = hasName ? name.trim() : req.user.name;
     const nextEmail = hasEmail ? email.trim().toLowerCase() : req.user.email;
+    const nextProfileImage =
+      hasProfileImage && typeof profileImageUrl === "string"
+        ? profileImageUrl.trim() || null
+        : hasProfileImage
+          ? null
+          : req.user.profile_image_url ?? null;
 
     if (!nextName) {
       return res.status(400).json({ message: "Name cannot be empty." });
@@ -225,6 +243,15 @@ router.patch("/me", protect, async (req, res) => {
 
     if (!nextEmail) {
       return res.status(400).json({ message: "Email cannot be empty." });
+    }
+
+    if (
+      typeof nextProfileImage === "string" &&
+      nextProfileImage.length > MAX_PROFILE_IMAGE_LENGTH
+    ) {
+      return res.status(413).json({
+        message: "Profile image is too large. Please upload a smaller image.",
+      });
     }
 
     if (nextEmail !== req.user.email) {
@@ -240,9 +267,9 @@ router.patch("/me", protect, async (req, res) => {
 
     await pool.query(
       `UPDATE users
-       SET name = $1, email = $2
-       WHERE id = $3`,
-      [nextName, nextEmail, req.user.id],
+       SET name = $1, email = $2, profile_image_url = $3
+       WHERE id = $4`,
+      [nextName, nextEmail, nextProfileImage, req.user.id],
     );
 
     if (hasNotifications) {

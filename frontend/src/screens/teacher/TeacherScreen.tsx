@@ -1,12 +1,22 @@
-﻿import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Bell, BookOpen, Calendar, Copy, Home, Menu, Plus, Settings, Sparkles } from "lucide-react";
+import {
+  Bell,
+  BookOpen,
+  CalendarClock,
+  ClipboardList,
+  Home,
+  Menu,
+  Settings,
+  Users,
+  Sparkles,
+} from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import toast from "react-hot-toast";
 import { Button } from "../../components/ui/Button";
-import { Card, CardContent } from "../../components/ui/Card";
 import { Input } from "../../components/ui/Input";
 import { GlobalThemeToggle } from "../../components/theme/GlobalThemeToggle";
+import { Avatar, AvatarFallback, AvatarImage } from "../../components/ui/avatar";
 import { useAuth } from "../../context/useAuth";
 import {
   analyzeSingleSubmission,
@@ -16,12 +26,14 @@ import {
   fetchClassActivities,
   fetchClassStudents,
   fetchClassSubmissions,
-  fetchTeacherClasses,
+  fetchTeacherOverview,
   type ActivitySubmissionType,
   type ClassActivity,
   type ClassSubmission,
   type EnrolledStudent,
   type TeacherClass,
+  type TeacherOverviewActivity,
+  type TeacherOverviewStudent,
 } from "./services/teacherClassroomService";
 import { generateUniqueClassCode } from "../../utils/ClassCode";
 import {
@@ -30,6 +42,12 @@ import {
 } from "./components/TeacherSidebar";
 import { TeacherClassManagerModal } from "./components/TeacherClassManagerModal";
 import { TeacherSettingsPanel } from "./components/TeacherSettingsPanel";
+import { TeacherHomeSection } from "./components/TeacherHomeSection";
+import { TeacherClassesSection } from "./components/TeacherClassesSection";
+import { TeacherStudentsSection } from "./components/TeacherStudentsSection";
+import { TeacherActivitiesSection } from "./components/TeacherActivitiesSection";
+import { TeacherUpcomingSection } from "./components/TeacherUpcomingSection";
+import { getDisplayInitials } from "../../utils/profileImage";
 
 type Section = TeacherSection;
 
@@ -44,18 +62,39 @@ type ActivityFormState = {
 const SIDEBAR_ITEMS = [
   { key: "home", label: "Home", icon: Home },
   { key: "classes", label: "Classes", icon: BookOpen },
-  { key: "calendar", label: "Calendar", icon: Calendar },
+  { key: "students", label: "Students", icon: Users },
+  { key: "activities", label: "Activities", icon: ClipboardList },
+  { key: "upcoming", label: "Upcoming", icon: CalendarClock },
   { key: "settings", label: "Settings", icon: Settings },
 ] as const;
 
 const DEFAULT_SECTION: Section = "home";
-const VALID_SECTIONS: Section[] = ["home", "classes", "calendar", "settings"];
+const LEGACY_SECTION_REDIRECTS: Record<string, Section> = {
+  calendar: "upcoming",
+};
+const VALID_SECTIONS: Section[] = [
+  "home",
+  "classes",
+  "students",
+  "activities",
+  "upcoming",
+  "settings",
+];
 
 const isValidSection = (value?: string): value is Section =>
   Boolean(value && VALID_SECTIONS.includes(value as Section));
 
-const resolveSection = (value?: string): Section =>
-  isValidSection(value) ? value : DEFAULT_SECTION;
+const resolveSection = (value?: string): Section => {
+  if (!value) {
+    return DEFAULT_SECTION;
+  }
+
+  if (LEGACY_SECTION_REDIRECTS[value]) {
+    return LEGACY_SECTION_REDIRECTS[value];
+  }
+
+  return isValidSection(value) ? value : DEFAULT_SECTION;
+};
 
 const getProbabilityTone = (probability: number | null) => {
   if (probability === null) {
@@ -84,7 +123,10 @@ export default function TeacherScreen() {
 
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [classes, setClasses] = useState<TeacherClass[]>([]);
-  const [isLoadingClasses, setIsLoadingClasses] = useState(true);
+  const [overviewStudents, setOverviewStudents] = useState<TeacherOverviewStudent[]>([]);
+  const [overviewActivities, setOverviewActivities] = useState<TeacherOverviewActivity[]>([]);
+  const [upcomingActivities, setUpcomingActivities] = useState<TeacherOverviewActivity[]>([]);
+  const [isLoadingOverview, setIsLoadingOverview] = useState(true);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isCreatingClass, setIsCreatingClass] = useState(false);
@@ -114,51 +156,38 @@ export default function TeacherScreen() {
   const [analyzingSubmissionId, setAnalyzingSubmissionId] = useState<string | null>(null);
   const [expandedSubmissionId, setExpandedSubmissionId] = useState<string | null>(null);
 
-  const totalStudents = useMemo(
-    () => classes.reduce((sum, classroom) => sum + classroom.students, 0),
-    [classes],
-  );
-
-  const totalAssignments = useMemo(
-    () => classes.reduce((sum, classroom) => sum + classroom.assignments, 0),
-    [classes],
-  );
-
-  const upcomingActivities = useMemo(() => {
-    return [...classActivities]
-      .sort(
-        (left, right) =>
-          new Date(left.dueDate).getTime() - new Date(right.dueDate).getTime(),
-      )
-      .slice(0, 5);
-  }, [classActivities]);
-
   const goToSection = (target: Section) => {
     navigate(`/teacher/teacher_screen/${target}`);
   };
 
   useEffect(() => {
-    if (!isValidSection(section)) {
-      navigate(`/teacher/teacher_screen/${DEFAULT_SECTION}`, { replace: true });
+    if (section !== activeSection) {
+      navigate(`/teacher/teacher_screen/${activeSection}`, { replace: true });
     }
-  }, [section, navigate]);
+  }, [activeSection, navigate, section]);
 
   useEffect(() => {
     setActivityForm((previous) => ({ ...previous, instructor: teacherName }));
   }, [teacherName]);
 
-  const loadTeacherClasses = async () => {
-    setIsLoadingClasses(true);
+  const loadTeacherOverview = async () => {
+    setIsLoadingOverview(true);
 
     try {
-      const loaded = await fetchTeacherClasses();
-      setClasses(loaded);
+      const overview = await fetchTeacherOverview();
+      setClasses(overview.classes);
+      setOverviewStudents(overview.students);
+      setOverviewActivities(overview.activities);
+      setUpcomingActivities(overview.upcoming);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load classes.";
+      const message = error instanceof Error ? error.message : "Failed to load dashboard data.";
       toast.error(message);
       setClasses([]);
+      setOverviewStudents([]);
+      setOverviewActivities([]);
+      setUpcomingActivities([]);
     } finally {
-      setIsLoadingClasses(false);
+      setIsLoadingOverview(false);
     }
   };
 
@@ -184,7 +213,7 @@ export default function TeacherScreen() {
   };
 
   useEffect(() => {
-    void loadTeacherClasses();
+    void loadTeacherOverview();
   }, []);
 
   const handleCopyCode = async (code: string) => {
@@ -225,7 +254,7 @@ export default function TeacherScreen() {
       setLatestCreatedCode(generatedCode);
       setIsCreateModalOpen(false);
       resetCreateClassForm();
-      await loadTeacherClasses();
+      await loadTeacherOverview();
       goToSection("classes");
       toast.success("Class created successfully.");
     } catch (error) {
@@ -278,7 +307,7 @@ export default function TeacherScreen() {
         dueDate: "",
       });
 
-      await Promise.all([loadTeacherClasses(), loadClassManagerData(managedClass.id)]);
+      await Promise.all([loadTeacherOverview(), loadClassManagerData(managedClass.id)]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to create activity.";
       toast.error(message);
@@ -297,7 +326,7 @@ export default function TeacherScreen() {
     try {
       const updated = await analyzeAllClassSubmissions(managedClass.id);
       toast.success(`Analysis complete. ${updated} submissions processed.`);
-      await loadClassManagerData(managedClass.id);
+      await Promise.all([loadTeacherOverview(), loadClassManagerData(managedClass.id)]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to analyze submissions.";
       toast.error(message);
@@ -321,7 +350,7 @@ export default function TeacherScreen() {
           : "";
 
       toast.success(`Submission analyzed${confidenceSuffix}.`);
-      await loadClassManagerData(managedClass.id);
+      await Promise.all([loadTeacherOverview(), loadClassManagerData(managedClass.id)]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to analyze submission.";
       toast.error(message);
@@ -340,200 +369,6 @@ export default function TeacherScreen() {
     navigate("/auth/login_screen", { replace: true });
   };
 
-  const renderHome = () => (
-    <div className="space-y-6">
-      <motion.div
-        initial={{ opacity: 0, y: 18 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="theme-surface rounded-3xl border border-dashed theme-border px-6 py-7 sm:px-8"
-      >
-        <h1 className="theme-title text-3xl font-extrabold sm:text-4xl">ArtSense AI</h1>
-        <p className="mt-4 max-w-3xl text-base theme-muted sm:text-lg">
-          Advanced machine learning analysis to distinguish between human-created and
-          AI-generated coursework.
-        </p>
-
-        <div className="mt-6 flex flex-wrap gap-3">
-          <Button onClick={() => setIsCreateModalOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Create Class
-          </Button>
-          <Button variant="outline" onClick={() => goToSection("classes")}>
-            Open Classes
-          </Button>
-        </div>
-      </motion.div>
-
-      <div className="grid gap-4 md:grid-cols-4">
-        <motion.div whileHover={{ y: -4 }}>
-          <Card className="theme-card">
-            <CardContent className="p-5">
-              <p className="text-xs uppercase tracking-wide theme-muted">Classes</p>
-              <p className="mt-2 text-3xl font-bold text-[var(--app-text)]">
-                {isLoadingClasses ? "--" : classes.length}
-              </p>
-            </CardContent>
-          </Card>
-        </motion.div>
-        <motion.div whileHover={{ y: -4 }}>
-          <Card className="theme-card">
-            <CardContent className="p-5">
-              <p className="text-xs uppercase tracking-wide theme-muted">Students</p>
-              <p className="mt-2 text-3xl font-bold text-[var(--app-text)]">
-                {isLoadingClasses ? "--" : totalStudents}
-              </p>
-            </CardContent>
-          </Card>
-        </motion.div>
-        <motion.div whileHover={{ y: -4 }}>
-          <Card className="theme-card">
-            <CardContent className="p-5">
-              <p className="text-xs uppercase tracking-wide theme-muted">Activities</p>
-              <p className="mt-2 text-3xl font-bold text-[var(--app-text)]">
-                {isLoadingClasses ? "--" : totalAssignments}
-              </p>
-            </CardContent>
-          </Card>
-        </motion.div>
-        <motion.div whileHover={{ y: -4 }}>
-          <Card className="theme-card">
-            <CardContent className="p-5">
-              <p className="text-xs uppercase tracking-wide theme-muted">Upcoming</p>
-              <p className="mt-2 text-3xl font-bold text-[var(--app-text)]">
-                {upcomingActivities.length}
-              </p>
-            </CardContent>
-          </Card>
-        </motion.div>
-      </div>
-    </div>
-  );
-
-  const renderClasses = () => (
-    <div className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-[var(--app-text)]">Your Classes</h2>
-          <p className="text-sm theme-muted">
-            Hover cards, manage activities, students, and AI analysis per class.
-          </p>
-        </div>
-        <Button onClick={() => setIsCreateModalOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          New Class
-        </Button>
-      </div>
-
-      {latestCreatedCode && (
-        <Card className="theme-card border-dashed theme-border">
-          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-medium theme-title">Latest generated join code</p>
-              <p className="font-mono text-2xl font-bold text-[var(--app-text)] tracking-widest">
-                {latestCreatedCode}
-              </p>
-            </div>
-            <Button variant="outline" onClick={() => handleCopyCode(latestCreatedCode)}>
-              <Copy className="mr-2 h-4 w-4" />
-              {copiedCode === latestCreatedCode ? "Copied" : "Copy Code"}
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {isLoadingClasses ? (
-        <Card className="theme-card">
-          <CardContent className="p-6 text-sm theme-muted">Loading classes...</CardContent>
-        </Card>
-      ) : classes.length === 0 ? (
-        <Card className="theme-card">
-          <CardContent className="p-6 text-sm theme-muted">
-            No classes yet. Create your first class.
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {classes.map((classroom) => (
-            <motion.div key={classroom.id} whileHover={{ scale: 1.01 }}>
-              <Card className="theme-card overflow-hidden">
-                <div className="h-1.5 bg-gradient-to-r from-[var(--app-accent)] to-[var(--app-accent-2)]" />
-                <CardContent className="space-y-4 p-5">
-                  <div>
-                    <p className="text-lg font-bold text-[var(--app-text)]">{classroom.name}</p>
-                    <p className="mt-1 text-sm theme-muted line-clamp-2">{classroom.description}</p>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)] p-3">
-                      <p className="text-xs theme-muted">Students</p>
-                      <p className="text-lg font-bold text-[var(--app-text)]">{classroom.students}</p>
-                    </div>
-                    <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)] p-3">
-                      <p className="text-xs theme-muted">Activities</p>
-                      <p className="text-lg font-bold text-[var(--app-text)]">{classroom.assignments}</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-3 rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)] px-4 py-3">
-                    <div>
-                      <p className="text-xs font-medium theme-title">Join code</p>
-                      <p className="font-mono font-bold text-[var(--app-text)] tracking-widest">
-                        {classroom.code}
-                      </p>
-                    </div>
-                    <Button variant="ghost" onClick={() => handleCopyCode(classroom.code)}>
-                      <Copy className="mr-1 h-4 w-4" />
-                      {copiedCode === classroom.code ? "Copied" : "Copy"}
-                    </Button>
-                  </div>
-
-                  <Button onClick={() => void openClassManager(classroom)}>Manage Class</Button>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-
-  const renderCalendar = () => (
-    <div className="space-y-5">
-      <div>
-        <h2 className="text-2xl font-bold text-[var(--app-text)]">Calendar</h2>
-        <p className="text-sm theme-muted">
-          Upcoming activities from the currently managed class.
-        </p>
-      </div>
-
-      {upcomingActivities.length === 0 ? (
-        <Card className="theme-card">
-          <CardContent className="p-6 text-sm theme-muted">
-            No upcoming activities to display yet.
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-3">
-          {upcomingActivities.map((activity) => (
-            <motion.div key={activity.id} whileHover={{ y: -2 }}>
-              <Card className="theme-card">
-                <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="font-semibold text-[var(--app-text)]">{activity.title}</p>
-                    <p className="text-sm theme-muted">{activity.description}</p>
-                  </div>
-                  <p className="text-sm theme-title font-semibold">
-                    {new Date(activity.dueDate).toLocaleString()}
-                  </p>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-
   const renderSettings = () => (
     <TeacherSettingsPanel
       onAccountDeleted={() => navigate("/auth/login_screen", { replace: true })}
@@ -546,7 +381,7 @@ export default function TeacherScreen() {
         items={[...SIDEBAR_ITEMS]}
         activeSection={activeSection}
         mobileOpen={mobileSidebarOpen}
-        onSelect={(section) => goToSection(section)}
+        onSelect={(selectedSection) => goToSection(selectedSection)}
         onCloseMobile={() => setMobileSidebarOpen(false)}
         onLogout={handleLogout}
       />
@@ -573,14 +408,59 @@ export default function TeacherScreen() {
             <button className="theme-ring inline-flex h-10 w-10 items-center justify-center rounded-xl border theme-border text-[var(--app-muted)] hover:bg-[color-mix(in_srgb,var(--app-accent)_10%,transparent)]">
               <Bell className="h-5 w-5" />
             </button>
+            <Avatar className="h-9 w-9 border theme-border">
+              {user?.profileImageUrl ? <AvatarImage src={user.profileImageUrl} alt={teacherName} /> : null}
+              <AvatarFallback className="text-xs font-semibold text-[var(--app-text)]">
+                {getDisplayInitials(teacherName)}
+              </AvatarFallback>
+            </Avatar>
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-6xl px-4 py-6 pb-10 sm:px-6 md:ml-20">
-        {activeSection === "home" && renderHome()}
-        {activeSection === "classes" && renderClasses()}
-        {activeSection === "calendar" && renderCalendar()}
+        {activeSection === "home" && (
+          <TeacherHomeSection
+            isLoading={isLoadingOverview}
+            classCount={classes.length}
+            studentCount={overviewStudents.length}
+            activityCount={overviewActivities.length}
+            upcomingCount={upcomingActivities.length}
+            onCreateClass={() => setIsCreateModalOpen(true)}
+            onOpenSection={goToSection}
+          />
+        )}
+
+        {activeSection === "classes" && (
+          <TeacherClassesSection
+            classes={classes}
+            isLoading={isLoadingOverview}
+            latestCreatedCode={latestCreatedCode}
+            copiedCode={copiedCode}
+            onCreateClass={() => setIsCreateModalOpen(true)}
+            onCopyCode={(code) => void handleCopyCode(code)}
+            onManageClass={(classroom) => void openClassManager(classroom)}
+          />
+        )}
+
+        {activeSection === "students" && (
+          <TeacherStudentsSection students={overviewStudents} isLoading={isLoadingOverview} />
+        )}
+
+        {activeSection === "activities" && (
+          <TeacherActivitiesSection
+            activities={overviewActivities}
+            isLoading={isLoadingOverview}
+          />
+        )}
+
+        {activeSection === "upcoming" && (
+          <TeacherUpcomingSection
+            upcomingActivities={upcomingActivities}
+            isLoading={isLoadingOverview}
+          />
+        )}
+
         {activeSection === "settings" && renderSettings()}
       </main>
 
@@ -685,9 +565,7 @@ export default function TeacherScreen() {
         onClose={() => setIsClassManagerOpen(false)}
         onAnalyzeAll={handleAnalyzeAll}
         onAnalyzeSubmission={(submissionId) => void handleAnalyzeSubmission(submissionId)}
-        onOpenSubmissionPage={(submissionId) =>
-          navigate(`/teacher/submissions/${submissionId}`)
-        }
+        onOpenSubmissionPage={(submissionId) => navigate(`/teacher/submissions/${submissionId}`)}
         onOpenAnalysisPage={(submissionId) =>
           navigate(`/teacher/submissions/${submissionId}/analysis`)
         }

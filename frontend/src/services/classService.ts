@@ -7,11 +7,17 @@ export type TeacherClass = {
   assignments: number;
   instructorId: string;
   createdAt: string;
+  teacherName: string;
+  teacherProfileImageUrl: string | null;
 };
 
-export type EnrolledClass = TeacherClass & {
+export type EnrolledClass = Omit<
+  TeacherClass,
+  "teacherName" | "teacherProfileImageUrl"
+> & {
   joinedAt: string;
   teacherName: string;
+  teacherProfileImageUrl: string | null;
 };
 
 export type ActivitySubmissionType = "essay" | "file";
@@ -46,8 +52,40 @@ export type EnrolledStudent = {
   id: string;
   name: string;
   email: string;
+  profileImageUrl: string | null;
   joinedAt: string;
   submissionCount: number;
+};
+
+export type TeacherOverviewStudent = {
+  id: string;
+  name: string;
+  email: string;
+  profileImageUrl: string | null;
+  firstJoinedAt: string;
+  lastJoinedAt: string;
+  classCount: number;
+  submissionCount: number;
+};
+
+export type TeacherOverviewActivity = {
+  id: string;
+  classId: string;
+  className: string;
+  title: string;
+  instructor: string;
+  description: string;
+  submissionType: ActivitySubmissionType;
+  dueDate: string;
+  createdAt: string;
+  submissionCount: number;
+};
+
+export type TeacherOverview = {
+  classes: TeacherClass[];
+  students: TeacherOverviewStudent[];
+  activities: TeacherOverviewActivity[];
+  upcoming: TeacherOverviewActivity[];
 };
 
 export type ClassSubmission = {
@@ -95,6 +133,7 @@ type ApiClass = {
   created_at: string;
   joined_at?: string;
   teacher_name?: string;
+  teacher_profile_image_url?: string | null;
 };
 
 type ApiActivity = {
@@ -121,7 +160,32 @@ type ApiStudent = {
   id: number;
   name: string;
   email: string;
+  profile_image_url?: string | null;
   joined_at: string;
+  submission_count: number;
+};
+
+type ApiTeacherOverviewStudent = {
+  id: number;
+  name: string;
+  email: string;
+  profile_image_url?: string | null;
+  first_joined_at: string;
+  last_joined_at: string;
+  class_count: number;
+  submission_count: number;
+};
+
+type ApiTeacherOverviewActivity = {
+  id: number;
+  class_id: number;
+  class_name: string;
+  title: string;
+  instructor: string;
+  description: string;
+  submission_type: ActivitySubmissionType;
+  due_date: string;
+  created_at: string;
   submission_count: number;
 };
 
@@ -189,12 +253,22 @@ const mapTeacherClass = (item: ApiClass): TeacherClass => ({
   assignments: Number(item.assignment_count ?? 0),
   instructorId: String(item.teacher_id),
   createdAt: item.created_at,
+  teacherName: item.teacher_name ?? "Unknown Teacher",
+  teacherProfileImageUrl: item.teacher_profile_image_url ?? null,
 });
 
 const mapEnrolledClass = (item: ApiClass): EnrolledClass => ({
-  ...mapTeacherClass(item),
+  id: String(item.id),
+  name: item.name,
+  code: item.code,
+  description: item.description,
+  students: Number(item.student_count ?? 0),
+  assignments: Number(item.assignment_count ?? 0),
+  instructorId: String(item.teacher_id),
+  createdAt: item.created_at,
   joinedAt: item.joined_at ?? item.created_at,
   teacherName: item.teacher_name ?? "Unknown Teacher",
+  teacherProfileImageUrl: item.teacher_profile_image_url ?? null,
 });
 
 const asNumber = (value: unknown): number | null => {
@@ -257,7 +331,36 @@ const mapStudent = (item: ApiStudent): EnrolledStudent => ({
   id: String(item.id),
   name: item.name,
   email: item.email,
+  profileImageUrl: item.profile_image_url ?? null,
   joinedAt: item.joined_at,
+  submissionCount: Number(item.submission_count ?? 0),
+});
+
+const mapTeacherOverviewStudent = (
+  item: ApiTeacherOverviewStudent,
+): TeacherOverviewStudent => ({
+  id: String(item.id),
+  name: item.name,
+  email: item.email,
+  profileImageUrl: item.profile_image_url ?? null,
+  firstJoinedAt: item.first_joined_at,
+  lastJoinedAt: item.last_joined_at,
+  classCount: Number(item.class_count ?? 0),
+  submissionCount: Number(item.submission_count ?? 0),
+});
+
+const mapTeacherOverviewActivity = (
+  item: ApiTeacherOverviewActivity,
+): TeacherOverviewActivity => ({
+  id: String(item.id),
+  classId: String(item.class_id),
+  className: item.class_name,
+  title: item.title,
+  instructor: item.instructor,
+  description: item.description,
+  submissionType: item.submission_type,
+  dueDate: item.due_date,
+  createdAt: item.created_at,
   submissionCount: Number(item.submission_count ?? 0),
 });
 
@@ -293,6 +396,22 @@ const mapSubmission = (item: ApiSubmission): ClassSubmission => {
 export async function fetchTeacherClasses(): Promise<TeacherClass[]> {
   const payload = await request<{ classes: ApiClass[] }>("/mine");
   return (payload.classes ?? []).map(mapTeacherClass);
+}
+
+export async function fetchTeacherOverview(): Promise<TeacherOverview> {
+  const payload = await request<{
+    classes: ApiClass[];
+    students: ApiTeacherOverviewStudent[];
+    activities: ApiTeacherOverviewActivity[];
+    upcoming: ApiTeacherOverviewActivity[];
+  }>("/teacher/overview");
+
+  return {
+    classes: (payload.classes ?? []).map(mapTeacherClass),
+    students: (payload.students ?? []).map(mapTeacherOverviewStudent),
+    activities: (payload.activities ?? []).map(mapTeacherOverviewActivity),
+    upcoming: (payload.upcoming ?? []).map(mapTeacherOverviewActivity),
+  };
 }
 
 export async function createTeacherClass(input: {

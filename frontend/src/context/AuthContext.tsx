@@ -17,6 +17,12 @@ const normalizeUser = (input: Record<string, unknown> | null): AuthUser | null =
     email: String(input.email ?? ""),
     role: (input.role === "teacher" ? "teacher" : "student") as UserRole,
     created_at: String(input.created_at ?? ""),
+    profileImageUrl:
+      typeof input.profile_image_url === "string"
+        ? input.profile_image_url
+        : typeof input.profileImageUrl === "string"
+          ? input.profileImageUrl
+          : null,
     notifications:
       typeof input.notifications === "boolean"
         ? input.notifications
@@ -173,6 +179,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     name: string;
     email: string;
     notifications: boolean;
+    profileImageUrl: string | null;
   }): Promise<AuthUser> => {
     setLoading(true);
     try {

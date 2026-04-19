@@ -3,7 +3,13 @@ import { AnimatePresence, motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
 import { LogOut, X } from "lucide-react";
 
-export type TeacherSection = "home" | "classes" | "calendar" | "settings";
+export type TeacherSection =
+  | "home"
+  | "classes"
+  | "students"
+  | "activities"
+  | "upcoming"
+  | "settings";
 
 export type TeacherSidebarItem = {
   key: TeacherSection;

@@ -4,7 +4,7 @@ import {
   ArrowLeft,
   Bell,
   BookOpen,
-  Calendar,
+  CalendarClock,
   Home,
   Menu,
   Settings,
@@ -28,7 +28,7 @@ import {
 const SIDEBAR_ITEMS = [
   { key: "home", label: "Home", icon: Home },
   { key: "classes", label: "Classes", icon: BookOpen },
-  { key: "calendar", label: "Calendar", icon: Calendar },
+  { key: "upcoming", label: "Upcoming", icon: CalendarClock },
   { key: "settings", label: "Settings", icon: Settings },
 ] as const;
 

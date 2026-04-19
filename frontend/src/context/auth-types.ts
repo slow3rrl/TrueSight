@@ -6,6 +6,7 @@ export type AuthUser = {
   email: string;
   role: UserRole;
   created_at: string;
+  profileImageUrl: string | null;
   notifications: boolean;
 };
 
@@ -26,6 +27,7 @@ export type AuthContextType = {
     name: string;
     email: string;
     notifications: boolean;
+    profileImageUrl: string | null;
   }) => Promise<AuthUser>;
   deleteAccount: () => Promise<void>;
   logout: () => Promise<void>;
