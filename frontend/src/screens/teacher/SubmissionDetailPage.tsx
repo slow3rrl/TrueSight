@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
-  Bell,
   BookOpen,
   CalendarClock,
   Home,
@@ -14,10 +13,13 @@ import toast from "react-hot-toast";
 import { Button } from "../../components/ui/Button";
 import { Card, CardContent } from "../../components/ui/Card";
 import { GlobalThemeToggle } from "../../components/theme/GlobalThemeToggle";
+import { ActivityNotificationsPopover } from "../../components/ActivityNotificationsPopover";
 import { useAuth } from "../../context/useAuth";
 import {
   analyzeSingleSubmission,
   fetchSubmissionDetail,
+  fetchUserNotifications,
+  type ActivityNotification,
   type ClassSubmission,
 } from "./services/teacherClassroomService";
 import {
@@ -44,6 +46,9 @@ export default function SubmissionDetailPage() {
   const [loading, setLoading] = useState(true);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [submission, setSubmission] = useState<ClassSubmission | null>(null);
+  const [notifications, setNotifications] = useState<ActivityNotification[]>([]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
 
   const loadSubmission = async () => {
     if (!submissionId) return;
@@ -61,10 +66,34 @@ export default function SubmissionDetailPage() {
     }
   };
 
+  const loadNotifications = async () => {
+    setIsLoadingNotifications(true);
+    try {
+      const payload = await fetchUserNotifications();
+      setNotifications(payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load notifications.";
+      toast.error(message);
+      setNotifications([]);
+    } finally {
+      setIsLoadingNotifications(false);
+    }
+  };
+
   useEffect(() => {
-    void loadSubmission();
+    void Promise.all([loadSubmission(), loadNotifications()]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submissionId]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void loadNotifications();
+    }, 60_000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -152,9 +181,14 @@ export default function SubmissionDetailPage() {
 
           <div className="flex items-center gap-3">
             <GlobalThemeToggle />
-            <button className="theme-ring inline-flex h-10 w-10 items-center justify-center rounded-xl border theme-border text-[var(--app-muted)] hover:bg-[color-mix(in_srgb,var(--app-accent)_10%,transparent)]">
-              <Bell className="h-5 w-5" />
-            </button>
+            <ActivityNotificationsPopover
+              notifications={notifications}
+              open={notificationsOpen}
+              loading={isLoadingNotifications}
+              onToggle={() => setNotificationsOpen((current) => !current)}
+              onClose={() => setNotificationsOpen(false)}
+              onRefresh={() => void loadNotifications()}
+            />
           </div>
         </div>
       </header>

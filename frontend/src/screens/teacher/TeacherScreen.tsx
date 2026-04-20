@@ -1,7 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  Bell,
   BookOpen,
   CalendarClock,
   ClipboardList,
@@ -18,6 +17,7 @@ import { Input } from "../../components/ui/Input";
 import { GlobalThemeToggle } from "../../components/theme/GlobalThemeToggle";
 import { Avatar, AvatarFallback, AvatarImage } from "../../components/ui/avatar";
 import { useAuth } from "../../context/useAuth";
+import { ActivityNotificationsPopover } from "../../components/ActivityNotificationsPopover";
 import {
   analyzeSingleSubmission,
   analyzeAllClassSubmissions,
@@ -26,11 +26,15 @@ import {
   fetchClassActivities,
   fetchClassStudents,
   fetchClassSubmissions,
+  fetchTeacherAnalytics,
   fetchTeacherOverview,
+  fetchUserNotifications,
+  type ActivityNotification,
   type ActivitySubmissionType,
   type ClassActivity,
   type ClassSubmission,
   type EnrolledStudent,
+  type TeacherAnalytics,
   type TeacherClass,
   type TeacherOverviewActivity,
   type TeacherOverviewStudent,
@@ -127,6 +131,11 @@ export default function TeacherScreen() {
   const [overviewActivities, setOverviewActivities] = useState<TeacherOverviewActivity[]>([]);
   const [upcomingActivities, setUpcomingActivities] = useState<TeacherOverviewActivity[]>([]);
   const [isLoadingOverview, setIsLoadingOverview] = useState(true);
+  const [analytics, setAnalytics] = useState<TeacherAnalytics | null>(null);
+  const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(true);
+  const [notifications, setNotifications] = useState<ActivityNotification[]>([]);
+  const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isCreatingClass, setIsCreatingClass] = useState(false);
@@ -191,6 +200,38 @@ export default function TeacherScreen() {
     }
   };
 
+  const loadTeacherAnalytics = async () => {
+    setIsLoadingAnalytics(true);
+
+    try {
+      const payload = await fetchTeacherAnalytics();
+      setAnalytics(payload);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to load analytics data.";
+      toast.error(message);
+      setAnalytics(null);
+    } finally {
+      setIsLoadingAnalytics(false);
+    }
+  };
+
+  const loadNotifications = async () => {
+    setIsLoadingNotifications(true);
+
+    try {
+      const payload = await fetchUserNotifications();
+      setNotifications(payload);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to load notifications.";
+      toast.error(message);
+      setNotifications([]);
+    } finally {
+      setIsLoadingNotifications(false);
+    }
+  };
+
   const loadClassManagerData = async (classId: string) => {
     setIsLoadingClassManager(true);
 
@@ -213,7 +254,21 @@ export default function TeacherScreen() {
   };
 
   useEffect(() => {
-    void loadTeacherOverview();
+    void Promise.all([
+      loadTeacherOverview(),
+      loadTeacherAnalytics(),
+      loadNotifications(),
+    ]);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void loadNotifications();
+    }, 60_000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
   }, []);
 
   const handleCopyCode = async (code: string) => {
@@ -254,7 +309,7 @@ export default function TeacherScreen() {
       setLatestCreatedCode(generatedCode);
       setIsCreateModalOpen(false);
       resetCreateClassForm();
-      await loadTeacherOverview();
+      await Promise.all([loadTeacherOverview(), loadTeacherAnalytics()]);
       goToSection("classes");
       toast.success("Class created successfully.");
     } catch (error) {
@@ -307,7 +362,12 @@ export default function TeacherScreen() {
         dueDate: "",
       });
 
-      await Promise.all([loadTeacherOverview(), loadClassManagerData(managedClass.id)]);
+      await Promise.all([
+        loadTeacherOverview(),
+        loadTeacherAnalytics(),
+        loadNotifications(),
+        loadClassManagerData(managedClass.id),
+      ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to create activity.";
       toast.error(message);
@@ -326,7 +386,12 @@ export default function TeacherScreen() {
     try {
       const updated = await analyzeAllClassSubmissions(managedClass.id);
       toast.success(`Analysis complete. ${updated} submissions processed.`);
-      await Promise.all([loadTeacherOverview(), loadClassManagerData(managedClass.id)]);
+      await Promise.all([
+        loadTeacherOverview(),
+        loadTeacherAnalytics(),
+        loadNotifications(),
+        loadClassManagerData(managedClass.id),
+      ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to analyze submissions.";
       toast.error(message);
@@ -350,7 +415,12 @@ export default function TeacherScreen() {
           : "";
 
       toast.success(`Submission analyzed${confidenceSuffix}.`);
-      await Promise.all([loadTeacherOverview(), loadClassManagerData(managedClass.id)]);
+      await Promise.all([
+        loadTeacherOverview(),
+        loadTeacherAnalytics(),
+        loadNotifications(),
+        loadClassManagerData(managedClass.id),
+      ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to analyze submission.";
       toast.error(message);
@@ -405,9 +475,14 @@ export default function TeacherScreen() {
 
           <div className="flex items-center gap-3">
             <GlobalThemeToggle />
-            <button className="theme-ring inline-flex h-10 w-10 items-center justify-center rounded-xl border theme-border text-[var(--app-muted)] hover:bg-[color-mix(in_srgb,var(--app-accent)_10%,transparent)]">
-              <Bell className="h-5 w-5" />
-            </button>
+            <ActivityNotificationsPopover
+              notifications={notifications}
+              open={notificationsOpen}
+              loading={isLoadingNotifications}
+              onToggle={() => setNotificationsOpen((current) => !current)}
+              onClose={() => setNotificationsOpen(false)}
+              onRefresh={() => void loadNotifications()}
+            />
             <Avatar className="h-9 w-9 border theme-border">
               {user?.profileImageUrl ? <AvatarImage src={user.profileImageUrl} alt={teacherName} /> : null}
               <AvatarFallback className="text-xs font-semibold text-[var(--app-text)]">
@@ -422,12 +497,15 @@ export default function TeacherScreen() {
         {activeSection === "home" && (
           <TeacherHomeSection
             isLoading={isLoadingOverview}
+            isLoadingAnalytics={isLoadingAnalytics}
             classCount={classes.length}
             studentCount={overviewStudents.length}
             activityCount={overviewActivities.length}
             upcomingCount={upcomingActivities.length}
+            analytics={analytics}
             onCreateClass={() => setIsCreateModalOpen(true)}
             onOpenSection={goToSection}
+            onOpenIntegrityAnalytics={() => navigate("/teacher/integrity-analytics")}
           />
         )}
 

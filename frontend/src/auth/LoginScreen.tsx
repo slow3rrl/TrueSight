@@ -21,7 +21,7 @@ const getErrorMessage = (error: unknown): string => {
 
 export default function LoginScreen() {
   const navigate = useNavigate();
-  const { signIn, user, loading, getMyProfile } = useAuth();
+  const { signIn, user, loading } = useAuth();
 
   const [role, setRole] = useState<UserRole>("student");
   const [email, setEmail] = useState("");
@@ -32,9 +32,8 @@ export default function LoginScreen() {
   });
   const [errors, setErrors] = useState<FormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isCheckingRole, setIsCheckingRole] = useState(false);
 
-  const isBusy = isSubmitting || loading || isCheckingRole;
+  const isBusy = isSubmitting || loading;
 
   const validationErrors = useMemo<FormErrors>(() => {
     const next: FormErrors = {};
@@ -63,40 +62,22 @@ export default function LoginScreen() {
   }, [touched, validationErrors]);
 
   useEffect(() => {
-    const redirectByRole = async () => {
-      if (!user) return;
+    if (!user) return;
 
-      try {
-        setIsCheckingRole(true);
-        const profile = await getMyProfile();
+    if (user.role !== role) {
+      setErrors({
+        role: `This account is registered as ${user.role}, not ${role}.`,
+      });
+      return;
+    }
 
-        if (!profile?.role) {
-          setErrors({ general: "This account has no valid role." });
-          return;
-        }
+    if (user.role === "teacher") {
+      navigate("/teacher/teacher_screen/home", { replace: true });
+      return;
+    }
 
-        if (profile.role !== role) {
-          setErrors({
-            role: `This account is registered as ${profile.role}, not ${role}.`,
-          });
-          return;
-        }
-
-        if (profile.role === "teacher") {
-          navigate("/teacher/teacher_screen/home", { replace: true });
-          return;
-        }
-
-        navigate("/student/student_screen", { replace: true });
-      } catch (error) {
-        setErrors({ general: getErrorMessage(error) });
-      } finally {
-        setIsCheckingRole(false);
-      }
-    };
-
-    void redirectByRole();
-  }, [user, role, getMyProfile, navigate]);
+    navigate("/student/student_screen", { replace: true });
+  }, [user, role, navigate]);
 
   const handleLogin = async () => {
     const nextErrors: FormErrors = { ...validationErrors };

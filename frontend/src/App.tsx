@@ -5,6 +5,7 @@ import StudentScreen from "./screens/student/StudentScreen";
 import TeacherScreen from "./screens/teacher/TeacherScreen";
 import SubmissionDetailPage from "./screens/teacher/SubmissionDetailPage";
 import SubmissionAnalysisReportPage from "./screens/teacher/SubmissionAnalysisReportPage";
+import IntegrityAnalyticsPage from "./screens/teacher/IntegrityAnalyticsPage";
 import "./index.css";
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
           path="/teacher/submissions/:submissionId/analysis"
           element={<SubmissionAnalysisReportPage />}
         />
+        <Route path="/teacher/integrity-analytics" element={<IntegrityAnalyticsPage />} />
         <Route path="/teacher/teacher_screen/:section" element={<TeacherScreen />} />
 
         {/* Fallback */}

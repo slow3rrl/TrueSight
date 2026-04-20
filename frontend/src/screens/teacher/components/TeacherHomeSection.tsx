@@ -1,27 +1,35 @@
 import { motion } from "framer-motion";
-import { BookOpen, CalendarClock, ClipboardList, Plus, Users } from "lucide-react";
+import { BarChart3, BookOpen, CalendarClock, ClipboardList, Plus, Users } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card, CardContent } from "../../../components/ui/Card";
+import type { TeacherAnalytics } from "../services/teacherClassroomService";
 import type { TeacherSection } from "./TeacherSidebar";
+import { TeacherIntegrityAnalyticsDashboard } from "./TeacherIntegrityAnalyticsDashboard";
 
 type TeacherHomeSectionProps = {
   isLoading: boolean;
+  isLoadingAnalytics: boolean;
   classCount: number;
   studentCount: number;
   activityCount: number;
   upcomingCount: number;
+  analytics: TeacherAnalytics | null;
   onCreateClass: () => void;
   onOpenSection: (section: TeacherSection) => void;
+  onOpenIntegrityAnalytics: () => void;
 };
 
 export function TeacherHomeSection({
   isLoading,
+  isLoadingAnalytics,
   classCount,
   studentCount,
   activityCount,
   upcomingCount,
+  analytics,
   onCreateClass,
   onOpenSection,
+  onOpenIntegrityAnalytics,
 }: TeacherHomeSectionProps) {
   return (
     <div className="space-y-6">
@@ -76,6 +84,14 @@ export function TeacherHomeSection({
               View Upcoming
             </Button>
           </div>
+          <Button
+            variant="outline"
+            className="w-full justify-start sm:w-auto"
+            onClick={onOpenIntegrityAnalytics}
+          >
+            <BarChart3 className="mr-2 h-4 w-4" />
+            Open Integrity Analytics Page
+          </Button>
         </div>
       </motion.div>
 
@@ -124,6 +140,11 @@ export function TeacherHomeSection({
           </Card>
         </motion.div>
       </div>
+
+      <TeacherIntegrityAnalyticsDashboard
+        analytics={analytics}
+        isLoading={isLoading || isLoadingAnalytics}
+      />
     </div>
   );
 }

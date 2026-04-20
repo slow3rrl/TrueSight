@@ -22,6 +22,53 @@ export type EnrolledClass = Omit<
 
 export type ActivitySubmissionType = "essay" | "file";
 
+export type ActivityNotificationType = "new_activity" | "upcoming_deadline";
+
+export type ActivityNotification = {
+  id: string;
+  type: ActivityNotificationType;
+  severity: "info" | "warning";
+  classId: string;
+  className: string;
+  activityId: string;
+  activityTitle: string;
+  title: string;
+  message: string;
+  eventAt: string;
+  dueDate: string | null;
+  createdAt: string | null;
+};
+
+export type ExplainabilitySignal = {
+  id: string;
+  label: string;
+  score: number;
+  explanation: string;
+};
+
+export type SuspiciousSentence = {
+  sentenceNumber: number;
+  sentence: string;
+  aiSuspicionScore: number;
+  reasons: string[];
+};
+
+export type SubmissionAnalysisDetails = {
+  source?: string;
+  verdict?: string;
+  reasons?: string[];
+  metrics?: Record<string, unknown>;
+  aiProbability?: number;
+  humanProbability?: number;
+  confidenceScore?: number;
+  confidenceLevel?: string;
+  writingConsistencyScore?: number;
+  humanRevisionLikelihood?: number;
+  suspiciousSentences?: SuspiciousSentence[];
+  explainabilitySignals?: ExplainabilitySignal[];
+  [key: string]: unknown;
+};
+
 export type StudentActivitySubmission = {
   id: string;
   status: string;
@@ -29,7 +76,7 @@ export type StudentActivitySubmission = {
   humanProbability: number | null;
   confidenceScore: number | null;
   isAIGenerated: boolean | null;
-  analysisDetails: Record<string, unknown> | null;
+  analysisDetails: SubmissionAnalysisDetails | null;
   submittedAt: string | null;
   contentText: string | null;
   fileName: string | null;
@@ -88,6 +135,35 @@ export type TeacherOverview = {
   upcoming: TeacherOverviewActivity[];
 };
 
+export type TeacherAnalyticsTotals = {
+  totalSubmissions: number;
+  flaggedOutputs: number;
+  averageIntegrityScore: number | null;
+};
+
+export type TeacherSuspiciousClass = {
+  classId: string;
+  className: string;
+  submissions: number;
+  flaggedOutputs: number;
+  averageAiProbability: number | null;
+  averageIntegrityScore: number | null;
+};
+
+export type TeacherMonthlyTrend = {
+  month: string;
+  monthKey: string;
+  submissions: number;
+  flaggedOutputs: number;
+  averageIntegrityScore: number | null;
+};
+
+export type TeacherAnalytics = {
+  totals: TeacherAnalyticsTotals;
+  topSuspiciousClasses: TeacherSuspiciousClass[];
+  monthlyTrends: TeacherMonthlyTrend[];
+};
+
 export type ClassSubmission = {
   id: string;
   activityId: string;
@@ -106,7 +182,7 @@ export type ClassSubmission = {
   humanProbability: number | null;
   confidenceScore: number | null;
   isAIGenerated: boolean | null;
-  analysisDetails: Record<string, unknown> | null;
+  analysisDetails: SubmissionAnalysisDetails | null;
   submittedAt: string;
   updatedAt: string;
 };
@@ -118,7 +194,7 @@ export type SubmissionAnalysisResult = {
   humanProbability: number | null;
   confidenceScore: number | null;
   isAIGenerated: boolean | null;
-  analysisDetails: Record<string, unknown> | null;
+  analysisDetails: SubmissionAnalysisDetails | null;
   updatedAt: string;
 };
 
@@ -150,7 +226,7 @@ type ApiActivity = {
   submission_status?: string | null;
   ai_probability?: number | null;
   is_ai_generated?: boolean | null;
-  analysis_details?: Record<string, unknown> | null;
+  analysis_details?: SubmissionAnalysisDetails | null;
   submitted_at?: string | null;
   content_text?: string | null;
   file_name?: string | null;
@@ -205,9 +281,51 @@ type ApiSubmission = {
   status: string;
   ai_probability: number | null;
   is_ai_generated: boolean | null;
-  analysis_details: Record<string, unknown> | null;
+  analysis_details: SubmissionAnalysisDetails | null;
   submitted_at: string;
   updated_at: string;
+};
+
+type ApiTeacherSuspiciousClass = {
+  classId: string;
+  className: string;
+  submissions: number;
+  flaggedOutputs: number;
+  averageAiProbability: number | null;
+  averageIntegrityScore: number | null;
+};
+
+type ApiTeacherMonthlyTrend = {
+  month: string;
+  monthKey: string;
+  submissions: number;
+  flaggedOutputs: number;
+  averageIntegrityScore: number | null;
+};
+
+type ApiTeacherAnalytics = {
+  totals: {
+    totalSubmissions: number;
+    flaggedOutputs: number;
+    averageIntegrityScore: number | null;
+  };
+  topSuspiciousClasses: ApiTeacherSuspiciousClass[];
+  monthlyTrends: ApiTeacherMonthlyTrend[];
+};
+
+type ApiActivityNotification = {
+  id: string;
+  type: ActivityNotificationType;
+  severity: "info" | "warning";
+  classId: string | number;
+  className: string;
+  activityId: string | number;
+  activityTitle: string;
+  title: string;
+  message: string;
+  eventAt: string;
+  dueDate?: string | null;
+  createdAt?: string | null;
 };
 
 const API_URL = "http://localhost:5000/api/classes";
@@ -286,7 +404,7 @@ const asNumber = (value: unknown): number | null => {
   return null;
 };
 
-const extractAnalysisNumbers = (details: Record<string, unknown> | null) => ({
+const extractAnalysisNumbers = (details: SubmissionAnalysisDetails | null) => ({
   humanProbability: asNumber(details?.humanProbability),
   confidenceScore: asNumber(details?.confidenceScore),
 });
@@ -364,6 +482,44 @@ const mapTeacherOverviewActivity = (
   submissionCount: Number(item.submission_count ?? 0),
 });
 
+const mapTeacherAnalytics = (payload: ApiTeacherAnalytics): TeacherAnalytics => ({
+  totals: {
+    totalSubmissions: Number(payload.totals?.totalSubmissions ?? 0),
+    flaggedOutputs: Number(payload.totals?.flaggedOutputs ?? 0),
+    averageIntegrityScore: asNumber(payload.totals?.averageIntegrityScore),
+  },
+  topSuspiciousClasses: (payload.topSuspiciousClasses ?? []).map((item) => ({
+    classId: item.classId,
+    className: item.className,
+    submissions: Number(item.submissions ?? 0),
+    flaggedOutputs: Number(item.flaggedOutputs ?? 0),
+    averageAiProbability: asNumber(item.averageAiProbability),
+    averageIntegrityScore: asNumber(item.averageIntegrityScore),
+  })),
+  monthlyTrends: (payload.monthlyTrends ?? []).map((item) => ({
+    month: item.month,
+    monthKey: item.monthKey,
+    submissions: Number(item.submissions ?? 0),
+    flaggedOutputs: Number(item.flaggedOutputs ?? 0),
+    averageIntegrityScore: asNumber(item.averageIntegrityScore),
+  })),
+});
+
+const mapNotification = (item: ApiActivityNotification): ActivityNotification => ({
+  id: item.id,
+  type: item.type,
+  severity: item.severity === "warning" ? "warning" : "info",
+  classId: String(item.classId),
+  className: item.className,
+  activityId: String(item.activityId),
+  activityTitle: item.activityTitle,
+  title: item.title,
+  message: item.message,
+  eventAt: item.eventAt,
+  dueDate: item.dueDate ?? null,
+  createdAt: item.createdAt ?? null,
+});
+
 const mapSubmission = (item: ApiSubmission): ClassSubmission => {
   const analysisDetails = item.analysis_details ?? null;
   const { humanProbability, confidenceScore } = extractAnalysisNumbers(analysisDetails);
@@ -412,6 +568,19 @@ export async function fetchTeacherOverview(): Promise<TeacherOverview> {
     activities: (payload.activities ?? []).map(mapTeacherOverviewActivity),
     upcoming: (payload.upcoming ?? []).map(mapTeacherOverviewActivity),
   };
+}
+
+export async function fetchTeacherAnalytics(): Promise<TeacherAnalytics> {
+  const payload = await request<ApiTeacherAnalytics>("/teacher/analytics");
+  return mapTeacherAnalytics(payload);
+}
+
+export async function fetchUserNotifications(): Promise<ActivityNotification[]> {
+  const payload = await request<{ notifications: ApiActivityNotification[] }>(
+    "/notifications",
+  );
+
+  return (payload.notifications ?? []).map(mapNotification);
 }
 
 export async function createTeacherClass(input: {
@@ -478,7 +647,7 @@ export async function submitActivitySubmission(
       status: string;
       ai_probability: number | null;
       is_ai_generated: boolean | null;
-      analysis_details: Record<string, unknown> | null;
+      analysis_details: SubmissionAnalysisDetails | null;
       submitted_at: string;
       content_text: string | null;
       file_name: string | null;
@@ -538,7 +707,7 @@ export async function analyzeSingleSubmission(
       status: string;
       ai_probability: number | null;
       is_ai_generated: boolean | null;
-      analysis_details: Record<string, unknown> | null;
+      analysis_details: SubmissionAnalysisDetails | null;
       updated_at: string;
     };
   }>(`/submissions/${submissionId}/analyze`, {

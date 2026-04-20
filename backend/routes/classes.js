@@ -110,8 +110,196 @@ const computeVariance = (values) => {
   return variance;
 };
 
+const average = (values) => {
+  if (!values.length) {
+    return null;
+  }
+
+  const sum = values.reduce((accumulator, value) => accumulator + value, 0);
+  return Number((sum / values.length).toFixed(2));
+};
+
+const deriveConfidenceLevel = (confidenceScore) => {
+  if (confidenceScore >= 85) {
+    return "Very High";
+  }
+
+  if (confidenceScore >= 72) {
+    return "High";
+  }
+
+  if (confidenceScore >= 60) {
+    return "Moderate";
+  }
+
+  return "Low";
+};
+
+const TRANSITION_PATTERN =
+  /\b(however|therefore|moreover|furthermore|additionally|meanwhile|consequently|nonetheless|instead|for example|for instance|in contrast|as a result|in conclusion|on the other hand)\b/i;
+
+const TEMPLATE_TRANSITION_OPENER_PATTERN =
+  /^(moreover|furthermore|additionally|therefore|in conclusion|overall|to summarize|as a result)\b/i;
+
+const extractSentences = (text) => {
+  const fromPunctuation = (String(text).match(/[^.!?]+[.!?]?/g) ?? [])
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+
+  if (fromPunctuation.length > 0) {
+    return fromPunctuation;
+  }
+
+  return String(text)
+    .split(/\n+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+};
+
+const scoreSuspiciousSentence = (sentence, index) => {
+  const lowered = sentence.toLowerCase();
+  const words = lowered.match(/\b[a-z0-9']+\b/g) ?? [];
+
+  if (!words.length) {
+    return null;
+  }
+
+  const uniqueRatio = new Set(words).size / words.length;
+  const reasons = [];
+  let suspicionScore = 20;
+
+  let repeatedNeighbors = 0;
+  for (let position = 1; position < words.length; position += 1) {
+    if (words[position] === words[position - 1]) {
+      repeatedNeighbors += 1;
+    }
+  }
+
+  const repeatedNeighborRatio = words.length
+    ? repeatedNeighbors / words.length
+    : 0;
+
+  if (uniqueRatio < 0.62 && words.length >= 8) {
+    suspicionScore += 20;
+    reasons.push("Repetitive phrasing");
+  }
+
+  if (words.length >= 18 && words.length <= 28) {
+    suspicionScore += 12;
+    reasons.push("Robotic sentence structure");
+  }
+
+  if (repeatedNeighborRatio > 0.03) {
+    suspicionScore += 16;
+    reasons.push("Repeated neighboring words");
+  }
+
+  if (TEMPLATE_TRANSITION_OPENER_PATTERN.test(lowered)) {
+    suspicionScore += 14;
+    reasons.push("Template-like transition opener");
+  }
+
+  if (!TRANSITION_PATTERN.test(lowered) && words.length >= 17) {
+    suspicionScore += 8;
+    reasons.push("Unnatural transition cue");
+  }
+
+  if (!/[!?]/.test(sentence) && /[,;:]/.test(sentence) && words.length >= 20) {
+    suspicionScore += 10;
+    reasons.push("Over-perfect grammar pattern");
+  }
+
+  const score = Number(clamp(Math.round(suspicionScore), 1, 100).toFixed(2));
+
+  return {
+    sentenceNumber: index + 1,
+    sentence,
+    aiSuspicionScore: score,
+    reasons,
+  };
+};
+
+const buildExplainabilitySignals = ({
+  uniqueRatio,
+  repetitionRatio,
+  sentenceLengthStdDeviation,
+  averageSentenceLength,
+  transitionDensity,
+  repeatedOpenerRatio,
+  formalSentenceRatio,
+  contractionRatio,
+}) => {
+  const repetitivePhrasingScore = clamp(
+    Math.round((1 - uniqueRatio) * 90 + repetitionRatio * 420),
+    0,
+    100,
+  );
+
+  const roboticStructureScore = clamp(
+    Math.round(
+      ((18 - Math.min(sentenceLengthStdDeviation, 18)) / 18) * 70 +
+        (averageSentenceLength >= 16 && averageSentenceLength <= 25 ? 20 : 8) +
+        (repeatedOpenerRatio > 0.15 ? 10 : 0),
+    ),
+    0,
+    100,
+  );
+
+  const unnaturalTransitionsScore = clamp(
+    Math.round(
+      (1 - Math.min(transitionDensity, 1)) * 60 +
+        repeatedOpenerRatio * 30 +
+        (averageSentenceLength > 22 ? 10 : 0),
+    ),
+    0,
+    100,
+  );
+
+  const overPerfectGrammarScore = clamp(
+    Math.round(
+      formalSentenceRatio * 70 +
+        (contractionRatio <= 0.005 ? 20 : 0) +
+        (sentenceLengthStdDeviation < 4.5 ? 10 : 0),
+    ),
+    0,
+    100,
+  );
+
+  return [
+    {
+      id: "repetitivePhrasing",
+      label: "Repetitive phrasing",
+      score: repetitivePhrasingScore,
+      explanation:
+        "Repeated vocabulary and neighboring terms can indicate machine-like wording reuse.",
+    },
+    {
+      id: "roboticStructure",
+      label: "Robotic structure",
+      score: roboticStructureScore,
+      explanation:
+        "Very uniform sentence size and mirrored phrasing patterns can appear algorithmic.",
+    },
+    {
+      id: "unnaturalTransitions",
+      label: "Unnatural transitions",
+      score: unnaturalTransitionsScore,
+      explanation:
+        "Abrupt sentence connections or template-style connectors can signal generated flow.",
+    },
+    {
+      id: "overPerfectGrammar",
+      label: "Over-perfect grammar",
+      score: overPerfectGrammarScore,
+      explanation:
+        "Exceptionally polished grammar with little natural variation can be AI-leaning.",
+    },
+  ];
+};
+
 const runHeuristicAnalysis = (text) => {
-  const normalized = text.trim().toLowerCase();
+  const rawText = String(text ?? "");
+  const normalized = rawText.trim().toLowerCase();
 
   if (!normalized) {
     return {
@@ -120,25 +308,65 @@ const runHeuristicAnalysis = (text) => {
       details: {
         source: "system",
         verdict: "No readable text found for analysis",
+        confidenceLevel: "Low",
+        writingConsistencyScore: 0,
+        humanRevisionLikelihood: 0,
+        suspiciousSentences: [],
+        explainabilitySignals: [
+          {
+            id: "repetitivePhrasing",
+            label: "Repetitive phrasing",
+            score: 0,
+            explanation: "No text available for pattern scoring.",
+          },
+          {
+            id: "roboticStructure",
+            label: "Robotic structure",
+            score: 0,
+            explanation: "No text available for pattern scoring.",
+          },
+          {
+            id: "unnaturalTransitions",
+            label: "Unnatural transitions",
+            score: 0,
+            explanation: "No text available for pattern scoring.",
+          },
+          {
+            id: "overPerfectGrammar",
+            label: "Over-perfect grammar",
+            score: 0,
+            explanation: "No text available for pattern scoring.",
+          },
+        ],
         reasons: [
           "This submission appears to be file-only with no extracted text.",
           "Upload a text body to run confidence scoring.",
         ],
+        metrics: {
+          wordCount: 0,
+          uniqueWordRatio: 0,
+          averageSentenceLength: 0,
+          sentenceVariance: 0,
+          sentenceStdDeviation: 0,
+          repetitionRatio: 0,
+          transitionDensity: 0,
+          repeatedOpenerRatio: 0,
+          formalSentenceRatio: 0,
+          contractionRatio: 0,
+        },
       },
     };
   }
 
+  const sentences = extractSentences(rawText);
   const words = normalized.match(/\b[a-z0-9']+\b/g) ?? [];
-  const sentences = normalized
-    .split(/[.!?]+/)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
+  const loweredSentences = sentences.map((sentence) => sentence.toLowerCase());
 
   const wordCount = words.length;
   const uniqueWordCount = new Set(words).size;
   const uniqueRatio = wordCount ? uniqueWordCount / wordCount : 1;
 
-  const sentenceLengths = sentences.map((sentence) => {
+  const sentenceLengths = loweredSentences.map((sentence) => {
     const parts = sentence.match(/\b[a-z0-9']+\b/g) ?? [];
     return parts.length;
   });
@@ -149,6 +377,42 @@ const runHeuristicAnalysis = (text) => {
       : 0;
 
   const sentenceVariance = computeVariance(sentenceLengths);
+  const sentenceLengthStdDeviation = Math.sqrt(sentenceVariance);
+
+  const transitionCount = loweredSentences.filter((sentence) =>
+    TRANSITION_PATTERN.test(sentence),
+  ).length;
+  const transitionDensity = sentences.length ? transitionCount / sentences.length : 0;
+
+  const openerCounts = new Map();
+  for (const sentence of loweredSentences) {
+    const sentenceWords = sentence.match(/\b[a-z0-9']+\b/g) ?? [];
+    if (sentenceWords.length < 2) continue;
+
+    const opener = `${sentenceWords[0]} ${sentenceWords[1]}`;
+    openerCounts.set(opener, (openerCounts.get(opener) ?? 0) + 1);
+  }
+
+  const repeatedOpeners = Array.from(openerCounts.values()).reduce((sum, count) => {
+    if (count > 1) {
+      return sum + (count - 1);
+    }
+
+    return sum;
+  }, 0);
+  const repeatedOpenerRatio = sentences.length ? repeatedOpeners / sentences.length : 0;
+
+  const formalSentenceCount = sentences.filter((sentence) => {
+    const trimmed = sentence.trim();
+    return /^[A-Z]/.test(trimmed) && /[.!?]$/.test(trimmed);
+  }).length;
+  const formalSentenceRatio = sentences.length
+    ? formalSentenceCount / sentences.length
+    : 0;
+
+  const contractionCount =
+    rawText.match(/\b\w+(?:n't|'re|'ve|'ll|'d|'m|'s)\b/gi)?.length ?? 0;
+  const contractionRatio = wordCount ? contractionCount / wordCount : 0;
 
   let repetitionMatches = 0;
   for (let index = 1; index < words.length; index += 1) {
@@ -162,24 +426,45 @@ const runHeuristicAnalysis = (text) => {
   let score = 35;
   const reasons = [];
 
-  if (uniqueRatio < 0.5) {
-    score += 18;
+  if (uniqueRatio < 0.52) {
+    score += 16;
     reasons.push("Low lexical variation detected across the submission.");
   }
 
-  if (sentenceVariance < 8) {
-    score += 14;
+  if (sentenceVariance < 10) {
+    score += 12;
     reasons.push("Sentence length is very uniform, which may indicate generated text.");
   }
 
   if (repetitionRatio > 0.03) {
-    score += 12;
+    score += 13;
     reasons.push("Repeated neighboring words or patterns were found.");
   }
 
   if (averageSentenceLength > 22) {
     score += 8;
     reasons.push("Long and consistently structured sentences were observed.");
+  }
+
+  if (transitionDensity < 0.22 && sentences.length >= 4) {
+    score += 8;
+    reasons.push("Transitions between ideas appear formulaic or abrupt.");
+  }
+
+  if (formalSentenceRatio > 0.88 && contractionRatio < 0.005 && sentences.length >= 4) {
+    score += 9;
+    reasons.push("Grammar appears overly polished with limited natural variation.");
+  }
+
+  const suspiciousSentences = sentences
+    .map((sentence, index) => scoreSuspiciousSentence(sentence, index))
+    .filter((entry) => entry && entry.aiSuspicionScore >= 56)
+    .sort((left, right) => right.aiSuspicionScore - left.aiSuspicionScore)
+    .slice(0, 8);
+
+  if (suspiciousSentences.length > 0) {
+    score += Math.min(12, suspiciousSentences.length * 2);
+    reasons.push("Sentence-level checks flagged sections with elevated AI-style patterns.");
   }
 
   if (wordCount < 70) {
@@ -189,6 +474,41 @@ const runHeuristicAnalysis = (text) => {
 
   score = clamp(score, 1, 99);
 
+  const explainabilitySignals = buildExplainabilitySignals({
+    uniqueRatio,
+    repetitionRatio,
+    sentenceLengthStdDeviation,
+    averageSentenceLength,
+    transitionDensity,
+    repeatedOpenerRatio,
+    formalSentenceRatio,
+    contractionRatio,
+  });
+
+  const overPerfectGrammarScore =
+    explainabilitySignals.find((signal) => signal.id === "overPerfectGrammar")?.score ?? 0;
+
+  const writingConsistencyScore = clamp(
+    Math.round(
+      100 -
+        Math.min(45, sentenceLengthStdDeviation * 6) -
+        Math.min(22, Math.max(0, 0.58 - uniqueRatio) * 120) -
+        Math.min(15, repetitionRatio * 280),
+    ),
+    0,
+    100,
+  );
+
+  const humanRevisionLikelihood = clamp(
+    Math.round(
+      (100 - score) * 0.55 +
+        writingConsistencyScore * 0.25 +
+        (100 - overPerfectGrammarScore) * 0.2,
+    ),
+    0,
+    100,
+  );
+
   return {
     probability: Number(score.toFixed(2)),
     isAIGenerated: score >= 60,
@@ -196,12 +516,22 @@ const runHeuristicAnalysis = (text) => {
       source: "heuristic",
       verdict: score >= 60 ? "Likely AI-generated" : "Likely human-written",
       reasons,
+      confidenceLevel: deriveConfidenceLevel(Math.max(score, 100 - score)),
+      writingConsistencyScore,
+      humanRevisionLikelihood,
+      suspiciousSentences,
+      explainabilitySignals,
       metrics: {
         wordCount,
         uniqueWordRatio: Number(uniqueRatio.toFixed(3)),
         averageSentenceLength: Number(averageSentenceLength.toFixed(2)),
         sentenceVariance: Number(sentenceVariance.toFixed(2)),
+        sentenceStdDeviation: Number(sentenceLengthStdDeviation.toFixed(2)),
         repetitionRatio: Number(repetitionRatio.toFixed(3)),
+        transitionDensity: Number(transitionDensity.toFixed(3)),
+        repeatedOpenerRatio: Number(repeatedOpenerRatio.toFixed(3)),
+        formalSentenceRatio: Number(formalSentenceRatio.toFixed(3)),
+        contractionRatio: Number(contractionRatio.toFixed(4)),
       },
     },
   };
@@ -289,12 +619,40 @@ const runGPTZeroAnalysis = async (text) => {
   }
 };
 
+const normalizeScore = (value) => {
+  const numeric =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : null;
+
+  if (numeric === null || !Number.isFinite(numeric)) {
+    return null;
+  }
+
+  return clamp(Number(numeric.toFixed(2)), 0, 100);
+};
+
 const buildAnalysisSummary = (analysis) => {
   const aiProbability = clamp(Number(analysis.probability) || 0, 0, 100);
   const humanProbability = Number((100 - aiProbability).toFixed(2));
   const confidenceScore = Number(
     Math.max(aiProbability, humanProbability).toFixed(2),
   );
+  const confidenceLevel = deriveConfidenceLevel(confidenceScore);
+
+  const baselineConsistency = Number((humanProbability * 0.75 + 12.5).toFixed(2));
+  const writingConsistencyScore =
+    normalizeScore(analysis?.details?.writingConsistencyScore) ??
+    clamp(baselineConsistency, 0, 100);
+
+  const baselineHumanRevisionLikelihood = Number(
+    ((humanProbability + writingConsistencyScore) / 2).toFixed(2),
+  );
+  const humanRevisionLikelihood =
+    normalizeScore(analysis?.details?.humanRevisionLikelihood) ??
+    clamp(baselineHumanRevisionLikelihood, 0, 100);
 
   return {
     aiProbability: Number(aiProbability.toFixed(2)),
@@ -306,17 +664,48 @@ const buildAnalysisSummary = (analysis) => {
       aiProbability: Number(aiProbability.toFixed(2)),
       humanProbability,
       confidenceScore,
+      confidenceLevel,
+      writingConsistencyScore,
+      humanRevisionLikelihood,
     },
   };
 };
 
 const analyzeText = async (text) => {
+  const heuristicAnalysis = runHeuristicAnalysis(text);
   const fromGPTZero = await runGPTZeroAnalysis(text);
-  if (fromGPTZero) {
-    return buildAnalysisSummary(fromGPTZero);
+  if (fromGPTZero && typeof fromGPTZero.probability === "number") {
+    const blendedProbability = Number(
+      (fromGPTZero.probability * 0.75 + heuristicAnalysis.probability * 0.25).toFixed(
+        2,
+      ),
+    );
+
+    const heuristicReasons = Array.isArray(heuristicAnalysis.details?.reasons)
+      ? heuristicAnalysis.details.reasons
+      : [];
+
+    return buildAnalysisSummary({
+      probability: blendedProbability,
+      isAIGenerated: blendedProbability >= 60,
+      details: {
+        ...heuristicAnalysis.details,
+        source: "gptzero+heuristic",
+        gptzeroProbability: Number(fromGPTZero.probability.toFixed(2)),
+        heuristicProbability: Number(heuristicAnalysis.probability.toFixed(2)),
+        verdict:
+          blendedProbability >= 60
+            ? "Likely AI-generated (blended model + heuristics)"
+            : "Likely human-written (blended model + heuristics)",
+        reasons: [
+          `External model estimate: ${Number(fromGPTZero.probability).toFixed(2)}% AI probability.`,
+          ...heuristicReasons,
+        ],
+      },
+    });
   }
 
-  return buildAnalysisSummary(runHeuristicAnalysis(text));
+  return buildAnalysisSummary(heuristicAnalysis);
 };
 
 const getStudentIdentityKey = (name, email) =>
@@ -349,6 +738,102 @@ const getAccessibleClass = async (classId, user) => {
   return null;
 };
 
+const monthKeyFromDate = (date) =>
+  `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+
+const monthLabelFromDate = (date) =>
+  date.toLocaleString("en-US", {
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+
+const buildRecentMonthBuckets = (count = 6) => {
+  const now = new Date();
+  const buckets = [];
+
+  for (let offset = count - 1; offset >= 0; offset -= 1) {
+    const bucketDate = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - offset, 1),
+    );
+
+    buckets.push({
+      key: monthKeyFromDate(bucketDate),
+      month: monthLabelFromDate(bucketDate),
+      submissions: 0,
+      flaggedOutputs: 0,
+      integrityScores: [],
+    });
+  }
+
+  return buckets;
+};
+
+const toISOStringOrNull = (value) => {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) {
+    return null;
+  }
+
+  return date.toISOString();
+};
+
+const buildNotificationId = (type, activityId, eventAt) =>
+  `${type}:${String(activityId)}:${String(eventAt)}`;
+
+const formatNotifications = ({ newActivities, upcomingActivities }) => {
+  const now = Date.now();
+
+  const newActivityNotifications = newActivities.map((activity) => {
+    const eventAt = toISOStringOrNull(activity.created_at) ?? new Date().toISOString();
+    const dueDate = toISOStringOrNull(activity.due_date);
+
+    return {
+      id: buildNotificationId("new_activity", activity.activity_id, eventAt),
+      type: "new_activity",
+      severity: "info",
+      classId: String(activity.class_id),
+      className: activity.class_name,
+      activityId: String(activity.activity_id),
+      activityTitle: activity.activity_title,
+      title: "New activity added",
+      message: `${activity.activity_title} was added in ${activity.class_name}.`,
+      eventAt,
+      dueDate,
+    };
+  });
+
+  const upcomingDeadlineNotifications = upcomingActivities.map((activity) => {
+    const dueDate = toISOStringOrNull(activity.due_date) ?? new Date().toISOString();
+    const createdAt = toISOStringOrNull(activity.created_at);
+    const dueInMs = new Date(dueDate).getTime() - now;
+    const dueInHours = dueInMs / (1000 * 60 * 60);
+    const severity = dueInHours <= 48 ? "warning" : "info";
+
+    return {
+      id: buildNotificationId("upcoming_deadline", activity.activity_id, dueDate),
+      type: "upcoming_deadline",
+      severity,
+      classId: String(activity.class_id),
+      className: activity.class_name,
+      activityId: String(activity.activity_id),
+      activityTitle: activity.activity_title,
+      title: "Upcoming deadline",
+      message: `${activity.activity_title} in ${activity.class_name} is due soon.`,
+      eventAt: dueDate,
+      dueDate,
+      createdAt,
+    };
+  });
+
+  return [...upcomingDeadlineNotifications, ...newActivityNotifications]
+    .sort((left, right) => {
+      const leftTime = new Date(left.eventAt).getTime();
+      const rightTime = new Date(right.eventAt).getTime();
+      return rightTime - leftTime;
+    });
+};
+
 router.get("/mine", protect, async (req, res) => {
   try {
     if (req.user.role !== "teacher") {
@@ -369,6 +854,86 @@ router.get("/mine", protect, async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       message: "Failed to load classes.",
+      error: error.message,
+    });
+  }
+});
+
+router.get("/notifications", protect, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const role = req.user.role;
+
+    if (role !== "teacher" && role !== "student") {
+      return res.status(400).json({ message: "Invalid user role for notifications." });
+    }
+
+    if (role === "student") {
+      const [newActivitiesResult, upcomingActivitiesResult] = await Promise.all([
+        pool.query(
+          `SELECT a.id AS activity_id, a.class_id, c.name AS class_name,
+                  a.title AS activity_title, a.created_at, a.due_date
+           FROM activities a
+           INNER JOIN classes c ON c.id = a.class_id
+           INNER JOIN class_enrollments ce ON ce.class_id = c.id
+           WHERE ce.student_id = $1
+           ORDER BY a.created_at DESC`,
+          [userId],
+        ),
+        pool.query(
+          `SELECT a.id AS activity_id, a.class_id, c.name AS class_name,
+                  a.title AS activity_title, a.created_at, a.due_date
+           FROM activities a
+           INNER JOIN classes c ON c.id = a.class_id
+           INNER JOIN class_enrollments ce ON ce.class_id = c.id
+           LEFT JOIN submissions s ON s.activity_id = a.id AND s.student_id = $1
+           WHERE ce.student_id = $1
+             AND a.due_date >= NOW()
+             AND s.id IS NULL
+           ORDER BY a.due_date ASC`,
+          [userId],
+        ),
+      ]);
+
+      const notifications = formatNotifications({
+        newActivities: newActivitiesResult.rows,
+        upcomingActivities: upcomingActivitiesResult.rows,
+      });
+
+      return res.status(200).json({ notifications });
+    }
+
+    const [newActivitiesResult, upcomingActivitiesResult] = await Promise.all([
+      pool.query(
+        `SELECT a.id AS activity_id, a.class_id, c.name AS class_name,
+                a.title AS activity_title, a.created_at, a.due_date
+         FROM activities a
+         INNER JOIN classes c ON c.id = a.class_id
+         WHERE c.teacher_id = $1
+         ORDER BY a.created_at DESC`,
+        [userId],
+      ),
+      pool.query(
+        `SELECT a.id AS activity_id, a.class_id, c.name AS class_name,
+                a.title AS activity_title, a.created_at, a.due_date
+         FROM activities a
+         INNER JOIN classes c ON c.id = a.class_id
+         WHERE c.teacher_id = $1
+           AND a.due_date >= NOW()
+         ORDER BY a.due_date ASC`,
+        [userId],
+      ),
+    ]);
+
+    const notifications = formatNotifications({
+      newActivities: newActivitiesResult.rows,
+      upcomingActivities: upcomingActivitiesResult.rows,
+    });
+
+    return res.status(200).json({ notifications });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Failed to load notifications.",
       error: error.message,
     });
   }
@@ -492,6 +1057,152 @@ router.get("/teacher/overview", protect, async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       message: "Failed to load teacher overview.",
+      error: error.message,
+    });
+  }
+});
+
+router.get("/teacher/analytics", protect, async (req, res) => {
+  try {
+    if (req.user.role !== "teacher") {
+      return res.status(403).json({
+        message: "Only teachers can view analytics.",
+      });
+    }
+
+    const submissionResult = await pool.query(
+      `SELECT s.ai_probability, s.submitted_at, c.id AS class_id, c.name AS class_name
+       FROM submissions s
+       INNER JOIN activities a ON a.id = s.activity_id
+       INNER JOIN classes c ON c.id = a.class_id
+       WHERE c.teacher_id = $1
+       ORDER BY s.submitted_at ASC`,
+      [req.user.id],
+    );
+
+    const classStatsMap = new Map();
+    const analyzedIntegrityScores = [];
+    const monthBuckets = buildRecentMonthBuckets(6);
+    const monthBucketMap = new Map(monthBuckets.map((bucket) => [bucket.key, bucket]));
+
+    for (const row of submissionResult.rows) {
+      const classId = Number(row.class_id);
+      if (!Number.isFinite(classId)) {
+        continue;
+      }
+
+      const className = row.class_name ?? "Unknown Class";
+      const aiProbability = getNumericCandidate(row.ai_probability);
+      const isFlagged = aiProbability !== null && aiProbability >= 60;
+
+      if (!classStatsMap.has(classId)) {
+        classStatsMap.set(classId, {
+          classId: String(classId),
+          className,
+          submissions: 0,
+          flaggedOutputs: 0,
+          aiProbabilities: [],
+          integrityScores: [],
+        });
+      }
+
+      const classStats = classStatsMap.get(classId);
+      classStats.submissions += 1;
+
+      if (isFlagged) {
+        classStats.flaggedOutputs += 1;
+      }
+
+      if (aiProbability !== null) {
+        classStats.aiProbabilities.push(aiProbability);
+        const integrityScore = Number((100 - aiProbability).toFixed(2));
+        classStats.integrityScores.push(integrityScore);
+        analyzedIntegrityScores.push(integrityScore);
+      }
+
+      const submittedAt = new Date(row.submitted_at);
+      if (Number.isFinite(submittedAt.getTime())) {
+        const key = monthKeyFromDate(submittedAt);
+        const monthBucket = monthBucketMap.get(key);
+
+        if (monthBucket) {
+          monthBucket.submissions += 1;
+
+          if (isFlagged) {
+            monthBucket.flaggedOutputs += 1;
+          }
+
+          if (aiProbability !== null) {
+            monthBucket.integrityScores.push(Number((100 - aiProbability).toFixed(2)));
+          }
+        }
+      }
+    }
+
+    const allClassAnalytics = Array.from(classStatsMap.values())
+      .map((entry) => {
+        const averageAiProbability = average(entry.aiProbabilities);
+        const averageIntegrityScore = average(entry.integrityScores);
+        const flaggedRate = entry.submissions
+          ? (entry.flaggedOutputs / entry.submissions) * 100
+          : 0;
+
+        return {
+          classId: entry.classId,
+          className: entry.className,
+          submissions: entry.submissions,
+          flaggedOutputs: entry.flaggedOutputs,
+          averageAiProbability,
+          averageIntegrityScore,
+          suspicionIndex: Number(
+            (
+              (averageAiProbability ?? 0) * 0.7 +
+              flaggedRate * 0.3
+            ).toFixed(2),
+          ),
+        };
+      });
+
+    const topSuspiciousClasses = [...allClassAnalytics]
+      .sort((left, right) => {
+        if (right.suspicionIndex !== left.suspicionIndex) {
+          return right.suspicionIndex - left.suspicionIndex;
+        }
+
+        if (right.flaggedOutputs !== left.flaggedOutputs) {
+          return right.flaggedOutputs - left.flaggedOutputs;
+        }
+
+        return right.submissions - left.submissions;
+      })
+      .slice(0, 5)
+      .map(({ suspicionIndex, ...rest }) => rest);
+
+    const monthlyTrends = monthBuckets.map((bucket) => ({
+      month: bucket.month,
+      monthKey: bucket.key,
+      submissions: bucket.submissions,
+      flaggedOutputs: bucket.flaggedOutputs,
+      averageIntegrityScore: average(bucket.integrityScores),
+    }));
+
+    const flaggedOutputs = allClassAnalytics.reduce(
+      (sum, classMetric) => sum + classMetric.flaggedOutputs,
+      0,
+    );
+
+    return res.status(200).json({
+      totals: {
+        totalSubmissions: submissionResult.rows.length,
+        flaggedOutputs,
+        averageIntegrityScore: average(analyzedIntegrityScores),
+      },
+      topSuspiciousClasses,
+      monthlyTrends,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Failed to load teacher analytics.",
       error: error.message,
     });
   }

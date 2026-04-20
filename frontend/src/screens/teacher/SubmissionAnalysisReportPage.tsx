@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
-  Bell,
   BookOpen,
   CalendarClock,
   Home,
@@ -14,12 +13,17 @@ import toast from "react-hot-toast";
 import { Button } from "../../components/ui/Button";
 import { Card, CardContent } from "../../components/ui/Card";
 import { GlobalThemeToggle } from "../../components/theme/GlobalThemeToggle";
+import { ActivityNotificationsPopover } from "../../components/ActivityNotificationsPopover";
 import { useAuth } from "../../context/useAuth";
 import {
   analyzeSingleSubmission,
   fetchSubmissionDetail,
+  fetchUserNotifications,
+  type ActivityNotification,
   type ClassSubmission,
 } from "./services/teacherClassroomService";
+import { AIExplainabilityPanel } from "./components/AIExplainabilityPanel";
+import { MultiLevelAIDetectionPanel } from "./components/MultiLevelAIDetectionPanel";
 import {
   TeacherSidebar,
   type TeacherSection,
@@ -54,6 +58,9 @@ export default function SubmissionAnalysisReportPage() {
   const [loading, setLoading] = useState(true);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [submission, setSubmission] = useState<ClassSubmission | null>(null);
+  const [notifications, setNotifications] = useState<ActivityNotification[]>([]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
 
   const loadSubmission = async () => {
     if (!submissionId) return;
@@ -71,10 +78,34 @@ export default function SubmissionAnalysisReportPage() {
     }
   };
 
+  const loadNotifications = async () => {
+    setIsLoadingNotifications(true);
+    try {
+      const payload = await fetchUserNotifications();
+      setNotifications(payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load notifications.";
+      toast.error(message);
+      setNotifications([]);
+    } finally {
+      setIsLoadingNotifications(false);
+    }
+  };
+
   useEffect(() => {
-    void loadSubmission();
+    void Promise.all([loadSubmission(), loadNotifications()]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submissionId]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void loadNotifications();
+    }, 60_000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -102,18 +133,8 @@ export default function SubmissionAnalysisReportPage() {
     }
   };
 
-  const details = useMemo(
-    () => (isRecord(submission?.analysisDetails) ? submission.analysisDetails : null),
-    [submission],
-  );
-  const reasons = Array.isArray(details?.reasons)
-    ? details.reasons.map((item) => String(item))
-    : [];
+  const details = useMemo(() => submission?.analysisDetails ?? null, [submission]);
   const metrics = isRecord(details?.metrics) ? details.metrics : null;
-  const verdict =
-    details && typeof details.verdict === "string"
-      ? details.verdict
-      : "No analysis verdict yet";
 
   return (
     <div className="min-h-screen bg-transparent text-[var(--app-text)]">
@@ -145,9 +166,14 @@ export default function SubmissionAnalysisReportPage() {
 
           <div className="flex items-center gap-3">
             <GlobalThemeToggle />
-            <button className="theme-ring inline-flex h-10 w-10 items-center justify-center rounded-xl border theme-border text-[var(--app-muted)] hover:bg-[color-mix(in_srgb,var(--app-accent)_10%,transparent)]">
-              <Bell className="h-5 w-5" />
-            </button>
+            <ActivityNotificationsPopover
+              notifications={notifications}
+              open={notificationsOpen}
+              loading={isLoadingNotifications}
+              onToggle={() => setNotificationsOpen((current) => !current)}
+              onClose={() => setNotificationsOpen(false)}
+              onRefresh={() => void loadNotifications()}
+            />
           </div>
         </div>
       </header>
@@ -201,58 +227,9 @@ export default function SubmissionAnalysisReportPage() {
               </CardContent>
             </Card>
 
-            <Card className="theme-card">
-              <CardContent className="space-y-3 p-5">
-                <h3 className="text-lg font-semibold text-[var(--app-text)]">Probability Summary</h3>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)] p-3">
-                    <p className="text-xs theme-muted">AI Probability</p>
-                    <p className="text-lg font-bold text-[var(--app-text)]">
-                      {typeof submission.aiProbability === "number"
-                        ? `${submission.aiProbability.toFixed(2)}%`
-                        : "N/A"}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)] p-3">
-                    <p className="text-xs theme-muted">Human Probability</p>
-                    <p className="text-lg font-bold text-[var(--app-text)]">
-                      {typeof submission.humanProbability === "number"
-                        ? `${submission.humanProbability.toFixed(2)}%`
-                        : "N/A"}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)] p-3">
-                    <p className="text-xs theme-muted">Confidence Score</p>
-                    <p className="text-lg font-bold text-[var(--app-text)]">
-                      {typeof submission.confidenceScore === "number"
-                        ? `${submission.confidenceScore.toFixed(2)}%`
-                        : "N/A"}
-                    </p>
-                  </div>
-                </div>
-                <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)] p-3">
-                  <p className="text-xs theme-muted">Verdict</p>
-                  <p className="font-semibold text-[var(--app-text)]">{verdict}</p>
-                </div>
-              </CardContent>
-            </Card>
+            <MultiLevelAIDetectionPanel submission={submission} details={details} />
 
-            <Card className="theme-card">
-              <CardContent className="space-y-3 p-5">
-                <h3 className="text-lg font-semibold text-[var(--app-text)]">Detailed Reasons</h3>
-                {reasons.length === 0 ? (
-                  <p className="text-sm theme-muted">
-                    No detailed reasons yet. Run analysis to populate this report.
-                  </p>
-                ) : (
-                  <ul className="list-disc space-y-2 pl-6 text-sm text-[var(--app-text)]">
-                    {reasons.map((reason, index) => (
-                      <li key={`reason-${index}`}>{reason}</li>
-                    ))}
-                  </ul>
-                )}
-              </CardContent>
-            </Card>
+            <AIExplainabilityPanel details={details} />
 
             <Card className="theme-card">
               <CardContent className="space-y-3 p-5">

@@ -1,17 +1,20 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Bell, BookOpen, Home, Menu, Plus, Settings, Sparkles } from "lucide-react";
+import { BookOpen, Home, Menu, Plus, Settings, Sparkles } from "lucide-react";
 import toast from "react-hot-toast";
 import { Button } from "../../components/ui/Button";
 import { Card, CardContent } from "../../components/ui/Card";
 import { Input } from "../../components/ui/Input";
 import { GlobalThemeToggle } from "../../components/theme/GlobalThemeToggle";
+import { ActivityNotificationsPopover } from "../../components/ActivityNotificationsPopover";
 import { useAuth } from "../../context/useAuth";
 import {
   fetchClassActivities,
   fetchEnrolledClasses,
+  fetchUserNotifications,
   joinClassByCode,
   submitActivitySubmission,
+  type ActivityNotification,
   type ClassActivity,
   type EnrolledClass,
 } from "./services/studentClassroomService";
@@ -49,6 +52,9 @@ export default function StudentScreen() {
   const [essayContent, setEssayContent] = useState("");
   const [fileName, setFileName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [notifications, setNotifications] = useState<ActivityNotification[]>([]);
+  const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
 
   const selectedClass = useMemo(
     () => enrolledClasses.find((item) => item.id === selectedClassId) ?? null,
@@ -100,8 +106,33 @@ export default function StudentScreen() {
     }
   };
 
+  const loadNotifications = async () => {
+    setIsLoadingNotifications(true);
+
+    try {
+      const payload = await fetchUserNotifications();
+      setNotifications(payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load notifications.";
+      toast.error(message);
+      setNotifications([]);
+    } finally {
+      setIsLoadingNotifications(false);
+    }
+  };
+
   useEffect(() => {
-    void loadEnrolledClasses();
+    void Promise.all([loadEnrolledClasses(), loadNotifications()]);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void loadNotifications();
+    }, 60_000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -125,7 +156,7 @@ export default function StudentScreen() {
       const joined = await joinClassByCode(joinCode.trim());
       toast.success(`Joined ${joined.name}`);
       setJoinCode("");
-      await loadEnrolledClasses();
+      await Promise.all([loadEnrolledClasses(), loadNotifications()]);
       setSelectedClassId(joined.id);
       setActiveSection("enrolled");
     } catch (error) {
@@ -174,7 +205,7 @@ export default function StudentScreen() {
       setFileName("");
 
       if (selectedClassId) {
-        await loadClassActivities(selectedClassId);
+        await Promise.all([loadClassActivities(selectedClassId), loadNotifications()]);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to submit work.";
@@ -327,9 +358,14 @@ export default function StudentScreen() {
 
           <div className="flex items-center gap-3">
             <GlobalThemeToggle />
-            <button className="theme-ring inline-flex h-10 w-10 items-center justify-center rounded-xl border theme-border text-[var(--app-muted)] hover:bg-[color-mix(in_srgb,var(--app-accent)_10%,transparent)]">
-              <Bell className="h-5 w-5" />
-            </button>
+            <ActivityNotificationsPopover
+              notifications={notifications}
+              open={notificationsOpen}
+              loading={isLoadingNotifications}
+              onToggle={() => setNotificationsOpen((current) => !current)}
+              onClose={() => setNotificationsOpen(false)}
+              onRefresh={() => void loadNotifications()}
+            />
           </div>
         </div>
       </header>
