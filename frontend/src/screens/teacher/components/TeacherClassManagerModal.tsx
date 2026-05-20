@@ -1,8 +1,9 @@
 ﻿import { AnimatePresence, motion } from "framer-motion";
-import { Plus, WandSparkles, X } from "lucide-react";
+import { FileText, Plus, WandSparkles, X } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card, CardContent } from "../../../components/ui/Card";
 import { Input } from "../../../components/ui/Input";
+import { formatFileSize } from "../../../utils/documentPreview";
 import type {
   ActivitySubmissionType,
   ClassActivity,
@@ -16,6 +17,11 @@ type ActivityFormState = {
   instructor: string;
   description: string;
   submissionType: ActivitySubmissionType;
+  allowResubmission: boolean;
+  attachmentName: string;
+  attachmentType: string;
+  attachmentSize: number;
+  attachmentDataUrl: string;
   dueDate: string;
 };
 
@@ -28,6 +34,8 @@ type TeacherClassManagerModalProps = {
   submissions: ClassSubmission[];
   activityForm: ActivityFormState;
   isCreatingActivity: boolean;
+  isPreparingAttachment: boolean;
+  attachmentProgress: number;
   isAnalyzing: boolean;
   analyzingSubmissionId: string | null;
   expandedSubmissionId: string | null;
@@ -35,8 +43,11 @@ type TeacherClassManagerModalProps = {
   onAnalyzeAll: () => void;
   onAnalyzeSubmission: (submissionId: string) => void;
   onOpenSubmissionPage: (submissionId: string) => void;
+  onOpenDocumentPreview: (submissionId: string) => void;
   onOpenAnalysisPage: (submissionId: string) => void;
   onSubmitActivity: (event: React.FormEvent) => void;
+  onSelectAttachment: (file: File | undefined) => void;
+  onClearAttachment: () => void;
   onChangeActivityForm: (patch: Partial<ActivityFormState>) => void;
   onToggleSubmission: (submissionId: string) => void;
   getProbabilityTone: (probability: number | null) => string;
@@ -51,6 +62,8 @@ export function TeacherClassManagerModal({
   submissions,
   activityForm,
   isCreatingActivity,
+  isPreparingAttachment,
+  attachmentProgress,
   isAnalyzing,
   analyzingSubmissionId,
   expandedSubmissionId,
@@ -58,8 +71,11 @@ export function TeacherClassManagerModal({
   onAnalyzeAll,
   onAnalyzeSubmission,
   onOpenSubmissionPage,
+  onOpenDocumentPreview,
   onOpenAnalysisPage,
   onSubmitActivity,
+  onSelectAttachment,
+  onClearAttachment,
   onChangeActivityForm,
   onToggleSubmission,
   getProbabilityTone,
@@ -96,12 +112,12 @@ export function TeacherClassManagerModal({
               </button>
             </div>
 
-            <div className="max-h-[calc(90vh-72px)] space-y-6 overflow-y-auto p-6">
+            <div className="flex max-h-[calc(90vh-72px)] flex-col gap-6 overflow-y-auto p-6">
               {loading ? (
                 <p className="text-sm theme-muted">Loading class data...</p>
               ) : (
                 <>
-                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  <div className="order-1 grid grid-cols-2 gap-3 md:grid-cols-4">
                     <Card className="theme-card">
                       <CardContent className="p-3">
                         <p className="text-xs theme-muted">Students Enrolled</p>
@@ -128,7 +144,7 @@ export function TeacherClassManagerModal({
                     </Card>
                   </div>
 
-                  <Card className="theme-card">
+                  <Card className="theme-card order-3">
                     <CardContent className="space-y-4 p-5">
                       <h4 className="text-lg font-semibold text-[var(--app-text)]">Create Activity</h4>
 
@@ -185,6 +201,80 @@ export function TeacherClassManagerModal({
                           />
                         </div>
 
+                        <label className="flex items-center gap-3 rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_82%,transparent)] px-3 py-2 text-sm text-[var(--app-text)]">
+                          <input
+                            type="checkbox"
+                            checked={activityForm.allowResubmission}
+                            onChange={(event) =>
+                              onChangeActivityForm({
+                                allowResubmission: event.target.checked,
+                              })
+                            }
+                            className="h-4 w-4 accent-[var(--app-accent)]"
+                          />
+                          Allow students to resubmit this activity
+                        </label>
+
+                        <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_82%,transparent)] p-3">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <p className="text-sm font-medium text-[var(--app-text)]">
+                                Activity Attachment
+                              </p>
+                              <p className="text-xs theme-muted">
+                                PDF, DOCX, images, or text files up to 5 MB.
+                              </p>
+                            </div>
+                            <Input
+                              type="file"
+                              accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv,.json"
+                              onChange={(event) =>
+                                onSelectAttachment(event.target.files?.[0])
+                              }
+                              className="sm:max-w-72"
+                            />
+                          </div>
+
+                          {isPreparingAttachment && (
+                            <div className="mt-3">
+                              <div className="mb-1 flex justify-between text-xs theme-muted">
+                                <span>Preparing attachment</span>
+                                <span>{attachmentProgress}%</span>
+                              </div>
+                              <div className="h-2 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--app-muted)_20%,transparent)]">
+                                <div
+                                  className="h-full rounded-full bg-[linear-gradient(135deg,var(--app-accent),var(--app-accent-2))] transition-all duration-300"
+                                  style={{ width: `${attachmentProgress}%` }}
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {activityForm.attachmentName && (
+                            <div className="mt-3 flex flex-col gap-3 rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_88%,transparent)] p-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="flex items-center gap-3">
+                                <FileText className="h-5 w-5 text-[var(--app-accent)]" />
+                                <div>
+                                  <p className="text-sm font-medium text-[var(--app-text)]">
+                                    {activityForm.attachmentName}
+                                  </p>
+                                  <p className="text-xs theme-muted">
+                                    {formatFileSize(activityForm.attachmentSize)}
+                                  </p>
+                                </div>
+                              </div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={onClearAttachment}
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+
                         <Button type="submit" disabled={isCreatingActivity}>
                           <Plus className="mr-2 h-4 w-4" />
                           {isCreatingActivity ? "Creating..." : "Add Activity"}
@@ -193,7 +283,7 @@ export function TeacherClassManagerModal({
                     </CardContent>
                   </Card>
 
-                  <Card className="theme-card">
+                  <Card className="theme-card order-4">
                     <CardContent className="space-y-3 p-5">
                       <h4 className="text-lg font-semibold text-[var(--app-text)]">Enrolled Students</h4>
 
@@ -220,7 +310,7 @@ export function TeacherClassManagerModal({
                     </CardContent>
                   </Card>
 
-                  <Card className="theme-card">
+                  <Card className="theme-card order-2">
                     <CardContent className="space-y-3 p-5">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <h4 className="text-lg font-semibold text-[var(--app-text)]">
@@ -297,6 +387,14 @@ export function TeacherClassManagerModal({
                                     onClick={() => onOpenSubmissionPage(submission.id)}
                                   >
                                     View Submission Page
+                                  </Button>
+
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => onOpenDocumentPreview(submission.id)}
+                                  >
+                                    Preview Document
                                   </Button>
 
                                   <Button

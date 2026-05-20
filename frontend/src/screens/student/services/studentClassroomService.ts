@@ -1,10 +1,18 @@
 export {
+  fetchActivityDetail,
   fetchClassActivities,
+  fetchDocumentPreview,
   fetchEnrolledClasses,
   fetchUserNotifications,
   joinClassByCode,
   submitActivitySubmission,
+  unsubmitActivitySubmission,
   type ActivityNotification,
+  type ActivityAttachment,
+  type ActivityDetail,
   type ClassActivity,
+  type DocumentPreviewType,
   type EnrolledClass,
+  type PreviewDocument,
+  type SubmissionHistoryEntry,
 } from "../../../services/classService";

@@ -1,4 +1,5 @@
 import { motion } from "framer-motion";
+import { ArrowRight, FileText } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card, CardContent } from "../../../components/ui/Card";
 import type {
@@ -15,7 +16,7 @@ type StudentEnrolledSectionProps = {
   isLoadingClasses: boolean;
   isLoadingActivities: boolean;
   onSelectClass: (classId: string) => void;
-  onOpenSubmissionModal: (activity: ClassActivity) => void;
+  onOpenActivityDetails: (activity: ClassActivity) => void;
 };
 
 export function StudentEnrolledSection({
@@ -26,7 +27,7 @@ export function StudentEnrolledSection({
   isLoadingClasses,
   isLoadingActivities,
   onSelectClass,
-  onOpenSubmissionModal,
+  onOpenActivityDetails,
 }: StudentEnrolledSectionProps) {
   return (
     <div className="space-y-5">
@@ -85,7 +86,8 @@ export function StudentEnrolledSection({
                     <motion.div
                       key={activity.id}
                       whileHover={{ scale: 1.01 }}
-                      className="rounded-2xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)] p-4 transition-all"
+                      onClick={() => onOpenActivityDetails(activity)}
+                      className="cursor-pointer rounded-2xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)] p-4 transition-all hover:border-[var(--app-accent)] hover:shadow-[var(--app-glow)]"
                     >
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div>
@@ -124,10 +126,23 @@ export function StudentEnrolledSection({
                         </div>
                       )}
 
-                      <div className="mt-3">
-                        <Button size="sm" onClick={() => onOpenSubmissionModal(activity)}>
-                          {activity.mySubmission ? "Resubmit Work" : "Submit Work"}
+                      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                        <Button
+                          size="sm"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onOpenActivityDetails(activity);
+                          }}
+                        >
+                          <ArrowRight className="mr-2 h-4 w-4" />
+                          View Activity
                         </Button>
+                        {activity.attachment && (
+                          <span className="inline-flex items-center rounded-lg border theme-border px-3 py-1.5 text-xs theme-muted">
+                            <FileText className="mr-2 h-3.5 w-3.5 text-[var(--app-accent)]" />
+                            Attachment
+                          </span>
+                        )}
                       </div>
                     </motion.div>
                   ))}

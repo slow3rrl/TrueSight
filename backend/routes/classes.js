@@ -1,6 +1,12 @@
 import express from "express";
 import jwt from "jsonwebtoken";
 import pool from "../config/db.js";
+import { analyzeText as analyzeTextWithService } from "../services/TextService.ts";
+import { analyzeImage } from "../services/ImageService.ts";
+import {
+  extractTextFromSubmissionFile,
+  isImageSubmission,
+} from "../services/FileTextExtractor.ts";
 
 const router = express.Router();
 
@@ -12,6 +18,14 @@ const ensureClassroomSchema = async () => {
   await pool.query(`
     ALTER TABLE users
     ADD COLUMN IF NOT EXISTS profile_image_url TEXT
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_preferences (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      notifications_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
   `);
 
   await pool.query(`
@@ -45,9 +59,23 @@ const ensureClassroomSchema = async () => {
       instructor VARCHAR(255) NOT NULL,
       description TEXT NOT NULL,
       submission_type VARCHAR(20) NOT NULL CHECK (submission_type IN ('essay', 'file')),
+      allow_resubmission BOOLEAN NOT NULL DEFAULT TRUE,
+      attachment_name VARCHAR(255),
+      attachment_type VARCHAR(120),
+      attachment_size BIGINT,
+      attachment_data_url TEXT,
       due_date TIMESTAMPTZ NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+  `);
+
+  await pool.query(`
+    ALTER TABLE activities
+    ADD COLUMN IF NOT EXISTS allow_resubmission BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS attachment_name VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS attachment_type VARCHAR(120),
+    ADD COLUMN IF NOT EXISTS attachment_size BIGINT,
+    ADD COLUMN IF NOT EXISTS attachment_data_url TEXT
   `);
 
   await pool.query(`
@@ -57,13 +85,41 @@ const ensureClassroomSchema = async () => {
       student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       content_text TEXT,
       file_name VARCHAR(255),
+      file_type VARCHAR(120),
+      file_size BIGINT,
+      file_data_url TEXT,
       status VARCHAR(20) NOT NULL DEFAULT 'pending',
       ai_probability NUMERIC(5,2),
       is_ai_generated BOOLEAN,
       analysis_details JSONB,
+      submitted_version INTEGER NOT NULL DEFAULT 1,
       submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE(activity_id, student_id)
+    )
+  `);
+
+  await pool.query(`
+    ALTER TABLE submissions
+    ADD COLUMN IF NOT EXISTS file_type VARCHAR(120),
+    ADD COLUMN IF NOT EXISTS file_size BIGINT,
+    ADD COLUMN IF NOT EXISTS file_data_url TEXT,
+    ADD COLUMN IF NOT EXISTS submitted_version INTEGER NOT NULL DEFAULT 1
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS submission_history (
+      id SERIAL PRIMARY KEY,
+      submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+      activity_id INTEGER NOT NULL REFERENCES activities(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      version INTEGER NOT NULL DEFAULT 1,
+      content_text TEXT,
+      file_name VARCHAR(255),
+      file_type VARCHAR(120),
+      file_size BIGINT,
+      status VARCHAR(20) NOT NULL DEFAULT 'pending',
+      submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
 
@@ -77,13 +133,19 @@ const protect = async (req, res, next) => {
     const token = req.cookies?.token;
 
     if (!token) {
-      return res.status(401).json({ message: "Not authorized. No token found." });
+      return res
+        .status(401)
+        .json({ message: "Not authorized. No token found." });
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     const user = await pool.query(
-      "SELECT id, name, email, role, profile_image_url FROM users WHERE id = $1",
+      `SELECT u.id, u.name, u.email, u.role, u.profile_image_url,
+              COALESCE(up.notifications_enabled, TRUE) AS notifications
+       FROM users u
+       LEFT JOIN user_preferences up ON up.user_id = u.id
+       WHERE u.id = $1`,
       [decoded.id],
     );
 
@@ -96,6 +158,117 @@ const protect = async (req, res, next) => {
   } catch {
     return res.status(401).json({ message: "Invalid or expired token." });
   }
+};
+
+const MAX_DOCUMENT_DATA_URL_LENGTH = 6_500_000;
+const SUPPORTED_DOCUMENT_EXTENSIONS = new Set([
+  "pdf",
+  "doc",
+  "docx",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "txt",
+  "md",
+  "csv",
+  "json",
+]);
+const SUPPORTED_DOCUMENT_TYPES = [
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "application/json",
+];
+
+const asTrimmedString = (value) =>
+  typeof value === "string" ? value.trim() : "";
+
+const getFileExtension = (fileName) => {
+  const match = String(fileName ?? "")
+    .toLowerCase()
+    .match(/\.([a-z0-9]+)$/);
+
+  return match?.[1] ?? "";
+};
+
+const isSupportedDocument = (fileName, fileType) => {
+  const normalizedType = asTrimmedString(fileType).toLowerCase();
+  const extension = getFileExtension(fileName);
+
+  return (
+    SUPPORTED_DOCUMENT_TYPES.includes(normalizedType) ||
+    SUPPORTED_DOCUMENT_EXTENSIONS.has(extension)
+  );
+};
+
+const normalizeDocumentUpload = ({
+  fileName,
+  fileType,
+  fileSize,
+  fileDataUrl,
+}) => {
+  const normalizedName = asTrimmedString(fileName);
+  const normalizedType = asTrimmedString(fileType) || null;
+  const normalizedDataUrl = asTrimmedString(fileDataUrl) || null;
+  const normalizedSize = Number(fileSize);
+
+  if (!normalizedName && !normalizedDataUrl) {
+    return {
+      fileName: null,
+      fileType: null,
+      fileSize: null,
+      fileDataUrl: null,
+    };
+  }
+
+  if (!normalizedName) {
+    const error = new Error("Document uploads require a file name.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!isSupportedDocument(normalizedName, normalizedType)) {
+    const error = new Error(
+      "Unsupported document type. Upload PDF, DOC, DOCX, image, or text-based files.",
+    );
+    error.statusCode = 415;
+    throw error;
+  }
+
+  if (
+    normalizedDataUrl &&
+    !/^data:[^;]+;base64,/i.test(normalizedDataUrl) &&
+    !/^data:text\/[^,]+,/i.test(normalizedDataUrl)
+  ) {
+    const error = new Error("Document preview data is invalid.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (
+    normalizedDataUrl &&
+    normalizedDataUrl.length > MAX_DOCUMENT_DATA_URL_LENGTH
+  ) {
+    const error = new Error("Document is too large to preview in-app.");
+    error.statusCode = 413;
+    throw error;
+  }
+
+  return {
+    fileName: normalizedName,
+    fileType: normalizedType,
+    fileSize: Number.isFinite(normalizedSize) ? normalizedSize : null,
+    fileDataUrl: normalizedDataUrl,
+  };
 };
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
@@ -373,7 +546,8 @@ const runHeuristicAnalysis = (text) => {
 
   const averageSentenceLength =
     sentenceLengths.length > 0
-      ? sentenceLengths.reduce((sum, count) => sum + count, 0) / sentenceLengths.length
+      ? sentenceLengths.reduce((sum, count) => sum + count, 0) /
+        sentenceLengths.length
       : 0;
 
   const sentenceVariance = computeVariance(sentenceLengths);
@@ -382,7 +556,9 @@ const runHeuristicAnalysis = (text) => {
   const transitionCount = loweredSentences.filter((sentence) =>
     TRANSITION_PATTERN.test(sentence),
   ).length;
-  const transitionDensity = sentences.length ? transitionCount / sentences.length : 0;
+  const transitionDensity = sentences.length
+    ? transitionCount / sentences.length
+    : 0;
 
   const openerCounts = new Map();
   for (const sentence of loweredSentences) {
@@ -393,14 +569,19 @@ const runHeuristicAnalysis = (text) => {
     openerCounts.set(opener, (openerCounts.get(opener) ?? 0) + 1);
   }
 
-  const repeatedOpeners = Array.from(openerCounts.values()).reduce((sum, count) => {
-    if (count > 1) {
-      return sum + (count - 1);
-    }
+  const repeatedOpeners = Array.from(openerCounts.values()).reduce(
+    (sum, count) => {
+      if (count > 1) {
+        return sum + (count - 1);
+      }
 
-    return sum;
-  }, 0);
-  const repeatedOpenerRatio = sentences.length ? repeatedOpeners / sentences.length : 0;
+      return sum;
+    },
+    0,
+  );
+  const repeatedOpenerRatio = sentences.length
+    ? repeatedOpeners / sentences.length
+    : 0;
 
   const formalSentenceCount = sentences.filter((sentence) => {
     const trimmed = sentence.trim();
@@ -433,7 +614,9 @@ const runHeuristicAnalysis = (text) => {
 
   if (sentenceVariance < 10) {
     score += 12;
-    reasons.push("Sentence length is very uniform, which may indicate generated text.");
+    reasons.push(
+      "Sentence length is very uniform, which may indicate generated text.",
+    );
   }
 
   if (repetitionRatio > 0.03) {
@@ -451,9 +634,15 @@ const runHeuristicAnalysis = (text) => {
     reasons.push("Transitions between ideas appear formulaic or abrupt.");
   }
 
-  if (formalSentenceRatio > 0.88 && contractionRatio < 0.005 && sentences.length >= 4) {
+  if (
+    formalSentenceRatio > 0.88 &&
+    contractionRatio < 0.005 &&
+    sentences.length >= 4
+  ) {
     score += 9;
-    reasons.push("Grammar appears overly polished with limited natural variation.");
+    reasons.push(
+      "Grammar appears overly polished with limited natural variation.",
+    );
   }
 
   const suspiciousSentences = sentences
@@ -464,7 +653,9 @@ const runHeuristicAnalysis = (text) => {
 
   if (suspiciousSentences.length > 0) {
     score += Math.min(12, suspiciousSentences.length * 2);
-    reasons.push("Sentence-level checks flagged sections with elevated AI-style patterns.");
+    reasons.push(
+      "Sentence-level checks flagged sections with elevated AI-style patterns.",
+    );
   }
 
   if (wordCount < 70) {
@@ -486,7 +677,8 @@ const runHeuristicAnalysis = (text) => {
   });
 
   const overPerfectGrammarScore =
-    explainabilitySignals.find((signal) => signal.id === "overPerfectGrammar")?.score ?? 0;
+    explainabilitySignals.find((signal) => signal.id === "overPerfectGrammar")
+      ?.score ?? 0;
 
   const writingConsistencyScore = clamp(
     Math.round(
@@ -610,7 +802,8 @@ const runGPTZeroAnalysis = async (text) => {
       isAIGenerated: probability >= 60,
       details: {
         source: "gptzero",
-        verdict: probability >= 60 ? "Likely AI-generated" : "Likely human-written",
+        verdict:
+          probability >= 60 ? "Likely AI-generated" : "Likely human-written",
         reasons: ["Scored using GPTZero API response."],
       },
     };
@@ -642,7 +835,9 @@ const buildAnalysisSummary = (analysis) => {
   );
   const confidenceLevel = deriveConfidenceLevel(confidenceScore);
 
-  const baselineConsistency = Number((humanProbability * 0.75 + 12.5).toFixed(2));
+  const baselineConsistency = Number(
+    (humanProbability * 0.75 + 12.5).toFixed(2),
+  );
   const writingConsistencyScore =
     normalizeScore(analysis?.details?.writingConsistencyScore) ??
     clamp(baselineConsistency, 0, 100);
@@ -676,9 +871,10 @@ const analyzeText = async (text) => {
   const fromGPTZero = await runGPTZeroAnalysis(text);
   if (fromGPTZero && typeof fromGPTZero.probability === "number") {
     const blendedProbability = Number(
-      (fromGPTZero.probability * 0.75 + heuristicAnalysis.probability * 0.25).toFixed(
-        2,
-      ),
+      (
+        fromGPTZero.probability * 0.75 +
+        heuristicAnalysis.probability * 0.25
+      ).toFixed(2),
     );
 
     const heuristicReasons = Array.isArray(heuristicAnalysis.details?.reasons)
@@ -709,7 +905,9 @@ const analyzeText = async (text) => {
 };
 
 const getStudentIdentityKey = (name, email) =>
-  `${String(email ?? "").trim().toLowerCase()}::${String(name ?? "")
+  `${String(email ?? "")
+    .trim()
+    .toLowerCase()}::${String(name ?? "")
     .trim()
     .toLowerCase()}`;
 
@@ -736,6 +934,30 @@ const getAccessibleClass = async (classId, user) => {
   }
 
   return null;
+};
+
+const getAccessibleActivity = async (activityId, user) => {
+  const activity = await pool.query(
+    `SELECT a.id, a.class_id, c.teacher_id
+     FROM activities a
+     INNER JOIN classes c ON c.id = a.class_id
+     WHERE a.id = $1
+     LIMIT 1`,
+    [activityId],
+  );
+
+  if (activity.rows.length === 0) {
+    return null;
+  }
+
+  const activityRow = activity.rows[0];
+  const classroom = await getAccessibleClass(activityRow.class_id, user);
+
+  if (!classroom) {
+    return null;
+  }
+
+  return activityRow;
 };
 
 const monthKeyFromDate = (date) =>
@@ -785,7 +1007,8 @@ const formatNotifications = ({ newActivities, upcomingActivities }) => {
   const now = Date.now();
 
   const newActivityNotifications = newActivities.map((activity) => {
-    const eventAt = toISOStringOrNull(activity.created_at) ?? new Date().toISOString();
+    const eventAt =
+      toISOStringOrNull(activity.created_at) ?? new Date().toISOString();
     const dueDate = toISOStringOrNull(activity.due_date);
 
     return {
@@ -804,14 +1027,19 @@ const formatNotifications = ({ newActivities, upcomingActivities }) => {
   });
 
   const upcomingDeadlineNotifications = upcomingActivities.map((activity) => {
-    const dueDate = toISOStringOrNull(activity.due_date) ?? new Date().toISOString();
+    const dueDate =
+      toISOStringOrNull(activity.due_date) ?? new Date().toISOString();
     const createdAt = toISOStringOrNull(activity.created_at);
     const dueInMs = new Date(dueDate).getTime() - now;
     const dueInHours = dueInMs / (1000 * 60 * 60);
-    const severity = dueInHours <= 48 ? "warning" : "info";
+    const severity = dueInHours <= 1 ? "warning" : "info";
 
     return {
-      id: buildNotificationId("upcoming_deadline", activity.activity_id, dueDate),
+      id: buildNotificationId(
+        "upcoming_deadline",
+        activity.activity_id,
+        dueDate,
+      ),
       type: "upcoming_deadline",
       severity,
       classId: String(activity.class_id),
@@ -819,25 +1047,28 @@ const formatNotifications = ({ newActivities, upcomingActivities }) => {
       activityId: String(activity.activity_id),
       activityTitle: activity.activity_title,
       title: "Upcoming deadline",
-      message: `${activity.activity_title} in ${activity.class_name} is due soon.`,
+      message: `${activity.activity_title} in ${activity.class_name} is due within 1 hour.`,
       eventAt: dueDate,
       dueDate,
       createdAt,
     };
   });
 
-  return [...upcomingDeadlineNotifications, ...newActivityNotifications]
-    .sort((left, right) => {
+  return [...upcomingDeadlineNotifications, ...newActivityNotifications].sort(
+    (left, right) => {
       const leftTime = new Date(left.eventAt).getTime();
       const rightTime = new Date(right.eventAt).getTime();
       return rightTime - leftTime;
-    });
+    },
+  );
 };
 
 router.get("/mine", protect, async (req, res) => {
   try {
     if (req.user.role !== "teacher") {
-      return res.status(403).json({ message: "Only teachers can view class list." });
+      return res
+        .status(403)
+        .json({ message: "Only teachers can view class list." });
     }
 
     const result = await pool.query(
@@ -865,35 +1096,46 @@ router.get("/notifications", protect, async (req, res) => {
     const role = req.user.role;
 
     if (role !== "teacher" && role !== "student") {
-      return res.status(400).json({ message: "Invalid user role for notifications." });
+      return res
+        .status(400)
+        .json({ message: "Invalid user role for notifications." });
+    }
+
+    if (req.user.notifications === false) {
+      return res.status(200).json({ notifications: [] });
     }
 
     if (role === "student") {
-      const [newActivitiesResult, upcomingActivitiesResult] = await Promise.all([
-        pool.query(
-          `SELECT a.id AS activity_id, a.class_id, c.name AS class_name,
+      const [newActivitiesResult, upcomingActivitiesResult] = await Promise.all(
+        [
+          pool.query(
+            `SELECT a.id AS activity_id, a.class_id, c.name AS class_name,
                   a.title AS activity_title, a.created_at, a.due_date
            FROM activities a
            INNER JOIN classes c ON c.id = a.class_id
            INNER JOIN class_enrollments ce ON ce.class_id = c.id
            WHERE ce.student_id = $1
+             AND a.created_at >= ce.joined_at
+             AND a.created_at >= NOW() - INTERVAL '24 hours'
            ORDER BY a.created_at DESC`,
-          [userId],
-        ),
-        pool.query(
-          `SELECT a.id AS activity_id, a.class_id, c.name AS class_name,
+            [userId],
+          ),
+          pool.query(
+            `SELECT a.id AS activity_id, a.class_id, c.name AS class_name,
                   a.title AS activity_title, a.created_at, a.due_date
            FROM activities a
            INNER JOIN classes c ON c.id = a.class_id
            INNER JOIN class_enrollments ce ON ce.class_id = c.id
            LEFT JOIN submissions s ON s.activity_id = a.id AND s.student_id = $1
            WHERE ce.student_id = $1
-             AND a.due_date >= NOW()
+             AND a.due_date > NOW()
+             AND a.due_date <= NOW() + INTERVAL '1 hour'
              AND s.id IS NULL
            ORDER BY a.due_date ASC`,
-          [userId],
-        ),
-      ]);
+            [userId],
+          ),
+        ],
+      );
 
       const notifications = formatNotifications({
         newActivities: newActivitiesResult.rows,
@@ -910,6 +1152,7 @@ router.get("/notifications", protect, async (req, res) => {
          FROM activities a
          INNER JOIN classes c ON c.id = a.class_id
          WHERE c.teacher_id = $1
+           AND a.created_at >= NOW() - INTERVAL '24 hours'
          ORDER BY a.created_at DESC`,
         [userId],
       ),
@@ -919,7 +1162,8 @@ router.get("/notifications", protect, async (req, res) => {
          FROM activities a
          INNER JOIN classes c ON c.id = a.class_id
          WHERE c.teacher_id = $1
-           AND a.due_date >= NOW()
+           AND a.due_date > NOW()
+           AND a.due_date <= NOW() + INTERVAL '1 hour'
          ORDER BY a.due_date ASC`,
         [userId],
       ),
@@ -942,31 +1186,36 @@ router.get("/notifications", protect, async (req, res) => {
 router.get("/teacher/overview", protect, async (req, res) => {
   try {
     if (req.user.role !== "teacher") {
-      return res.status(403).json({ message: "Only teachers can view this overview." });
+      return res
+        .status(403)
+        .json({ message: "Only teachers can view this overview." });
     }
 
-    const [classesResult, activitiesResult, enrollmentsResult] = await Promise.all([
-      pool.query(
-        `SELECT c.id, c.name, c.code, c.description, c.teacher_id, c.student_count, c.assignment_count, c.created_at,
+    const [classesResult, activitiesResult, enrollmentsResult] =
+      await Promise.all([
+        pool.query(
+          `SELECT c.id, c.name, c.code, c.description, c.teacher_id, c.student_count, c.assignment_count, c.created_at,
                 u.name AS teacher_name, u.profile_image_url AS teacher_profile_image_url
          FROM classes c
          INNER JOIN users u ON u.id = c.teacher_id
          WHERE c.teacher_id = $1
          ORDER BY c.created_at DESC`,
-        [req.user.id],
-      ),
-      pool.query(
-        `SELECT a.id, a.class_id, c.name AS class_name,
-                a.title, a.instructor, a.description, a.submission_type, a.due_date, a.created_at,
+          [req.user.id],
+        ),
+        pool.query(
+          `SELECT a.id, a.class_id, c.name AS class_name,
+                a.title, a.instructor, a.description, a.submission_type,
+                a.allow_resubmission, a.attachment_name, a.attachment_type,
+                a.attachment_size, a.due_date, a.created_at,
                 COALESCE((SELECT COUNT(*) FROM submissions s WHERE s.activity_id = a.id), 0)::int AS submission_count
          FROM activities a
          INNER JOIN classes c ON c.id = a.class_id
          WHERE c.teacher_id = $1
          ORDER BY a.created_at DESC`,
-        [req.user.id],
-      ),
-      pool.query(
-        `SELECT ce.class_id, ce.joined_at, u.id, u.name, u.email, u.profile_image_url,
+          [req.user.id],
+        ),
+        pool.query(
+          `SELECT ce.class_id, ce.joined_at, u.id, u.name, u.email, u.profile_image_url,
                 COALESCE((
                   SELECT COUNT(*)
                   FROM submissions s
@@ -978,9 +1227,9 @@ router.get("/teacher/overview", protect, async (req, res) => {
          INNER JOIN users u ON u.id = ce.student_id
          WHERE c.teacher_id = $1
          ORDER BY ce.joined_at ASC`,
-        [req.user.id],
-      ),
-    ]);
+          [req.user.id],
+        ),
+      ]);
 
     const dedupedStudents = new Map();
 
@@ -1045,7 +1294,8 @@ router.get("/teacher/overview", protect, async (req, res) => {
       .filter((activity) => new Date(activity.due_date).getTime() >= now)
       .sort(
         (left, right) =>
-          new Date(left.due_date).getTime() - new Date(right.due_date).getTime(),
+          new Date(left.due_date).getTime() -
+          new Date(right.due_date).getTime(),
       );
 
     return res.status(200).json({
@@ -1083,7 +1333,9 @@ router.get("/teacher/analytics", protect, async (req, res) => {
     const classStatsMap = new Map();
     const analyzedIntegrityScores = [];
     const monthBuckets = buildRecentMonthBuckets(6);
-    const monthBucketMap = new Map(monthBuckets.map((bucket) => [bucket.key, bucket]));
+    const monthBucketMap = new Map(
+      monthBuckets.map((bucket) => [bucket.key, bucket]),
+    );
 
     for (const row of submissionResult.rows) {
       const classId = Number(row.class_id);
@@ -1133,14 +1385,16 @@ router.get("/teacher/analytics", protect, async (req, res) => {
           }
 
           if (aiProbability !== null) {
-            monthBucket.integrityScores.push(Number((100 - aiProbability).toFixed(2)));
+            monthBucket.integrityScores.push(
+              Number((100 - aiProbability).toFixed(2)),
+            );
           }
         }
       }
     }
 
-    const allClassAnalytics = Array.from(classStatsMap.values())
-      .map((entry) => {
+    const allClassAnalytics = Array.from(classStatsMap.values()).map(
+      (entry) => {
         const averageAiProbability = average(entry.aiProbabilities);
         const averageIntegrityScore = average(entry.integrityScores);
         const flaggedRate = entry.submissions
@@ -1155,13 +1409,11 @@ router.get("/teacher/analytics", protect, async (req, res) => {
           averageAiProbability,
           averageIntegrityScore,
           suspicionIndex: Number(
-            (
-              (averageAiProbability ?? 0) * 0.7 +
-              flaggedRate * 0.3
-            ).toFixed(2),
+            ((averageAiProbability ?? 0) * 0.7 + flaggedRate * 0.3).toFixed(2),
           ),
         };
-      });
+      },
+    );
 
     const topSuspiciousClasses = [...allClassAnalytics]
       .sort((left, right) => {
@@ -1211,7 +1463,9 @@ router.get("/teacher/analytics", protect, async (req, res) => {
 router.post("/", protect, async (req, res) => {
   try {
     if (req.user.role !== "teacher") {
-      return res.status(403).json({ message: "Only teachers can create classes." });
+      return res
+        .status(403)
+        .json({ message: "Only teachers can create classes." });
     }
 
     const { name, code, description } = req.body;
@@ -1248,7 +1502,9 @@ router.post("/", protect, async (req, res) => {
 router.post("/join", protect, async (req, res) => {
   try {
     if (req.user.role !== "student") {
-      return res.status(403).json({ message: "Only students can join classes." });
+      return res
+        .status(403)
+        .json({ message: "Only students can join classes." });
     }
 
     const { code } = req.body;
@@ -1268,7 +1524,9 @@ router.post("/join", protect, async (req, res) => {
     );
 
     if (classResult.rows.length === 0) {
-      return res.status(404).json({ message: "Class not found for the provided code." });
+      return res
+        .status(404)
+        .json({ message: "Class not found for the provided code." });
     }
 
     const classroom = classResult.rows[0];
@@ -1291,7 +1549,9 @@ router.post("/join", protect, async (req, res) => {
     }
 
     return res.status(200).json({
-      message: newlyEnrolled ? "Successfully joined class." : "You are already enrolled in this class.",
+      message: newlyEnrolled
+        ? "Successfully joined class."
+        : "You are already enrolled in this class.",
       class: {
         ...classroom,
         student_count: newlyEnrolled
@@ -1310,7 +1570,9 @@ router.post("/join", protect, async (req, res) => {
 router.get("/enrolled", protect, async (req, res) => {
   try {
     if (req.user.role !== "student") {
-      return res.status(403).json({ message: "Only students can view enrolled classes." });
+      return res
+        .status(403)
+        .json({ message: "Only students can view enrolled classes." });
     }
 
     const result = await pool.query(
@@ -1333,6 +1595,228 @@ router.get("/enrolled", protect, async (req, res) => {
   }
 });
 
+router.get("/activities/:activityId", protect, async (req, res) => {
+  try {
+    const activityId = Number(req.params.activityId);
+
+    if (!Number.isFinite(activityId)) {
+      return res.status(400).json({ message: "Invalid activity id." });
+    }
+
+    const activityResult = await pool.query(
+      `SELECT a.id, a.class_id, c.name AS class_name, c.code AS class_code,
+              a.title, a.instructor, a.description, a.submission_type,
+              a.allow_resubmission, a.attachment_name, a.attachment_type,
+              a.attachment_size, a.due_date, a.created_at,
+              u.name AS teacher_name, u.profile_image_url AS teacher_profile_image_url
+       FROM activities a
+       INNER JOIN classes c ON c.id = a.class_id
+       INNER JOIN users u ON u.id = c.teacher_id
+       WHERE a.id = $1
+       LIMIT 1`,
+      [activityId],
+    );
+
+    if (activityResult.rows.length === 0) {
+      return res.status(404).json({ message: "Activity not found." });
+    }
+
+    const activity = activityResult.rows[0];
+    const classroom = await getAccessibleClass(activity.class_id, req.user);
+
+    if (!classroom) {
+      return res
+        .status(403)
+        .json({ message: "You do not have access to this activity." });
+    }
+
+    let submission = null;
+    let history = [];
+
+    if (req.user.role === "student") {
+      const submissionResult = await pool.query(
+        `SELECT id, activity_id, student_id, content_text, file_name, file_type,
+                file_size, status, ai_probability, is_ai_generated, analysis_details,
+                submitted_version, submitted_at, updated_at
+         FROM submissions
+         WHERE activity_id = $1 AND student_id = $2
+         LIMIT 1`,
+        [activityId, req.user.id],
+      );
+
+      submission = submissionResult.rows[0] ?? null;
+
+      const historyResult = await pool.query(
+        `SELECT id, submission_id, activity_id, student_id, version, content_text,
+                file_name, file_type, file_size, status, submitted_at
+         FROM submission_history
+         WHERE activity_id = $1 AND student_id = $2
+         ORDER BY version DESC, submitted_at DESC`,
+        [activityId, req.user.id],
+      );
+
+      history = historyResult.rows;
+
+      if (history.length === 0 && submission) {
+        history = [
+          {
+            id: submission.id,
+            submission_id: submission.id,
+            activity_id: submission.activity_id,
+            student_id: submission.student_id,
+            version: submission.submitted_version ?? 1,
+            content_text: submission.content_text,
+            file_name: submission.file_name,
+            file_type: submission.file_type,
+            file_size: submission.file_size,
+            status: submission.status,
+            submitted_at: submission.submitted_at,
+          },
+        ];
+      }
+    }
+
+    return res.status(200).json({
+      activity,
+      submission,
+      history,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Failed to load activity.",
+      error: error.message,
+    });
+  }
+});
+
+router.get(
+  "/documents/:documentType/:documentId",
+  protect,
+  async (req, res) => {
+    try {
+      const { documentType } = req.params;
+      const documentId = Number(req.params.documentId);
+
+      if (!Number.isFinite(documentId)) {
+        return res.status(400).json({ message: "Invalid document id." });
+      }
+
+      if (documentType === "activity-attachment") {
+        const activityResult = await pool.query(
+          `SELECT a.id, a.class_id, c.name AS class_name, a.title AS activity_title,
+                a.attachment_name, a.attachment_type, a.attachment_size,
+                a.attachment_data_url, a.created_at
+         FROM activities a
+         INNER JOIN classes c ON c.id = a.class_id
+         WHERE a.id = $1
+         LIMIT 1`,
+          [documentId],
+        );
+
+        if (activityResult.rows.length === 0) {
+          return res
+            .status(404)
+            .json({ message: "Activity attachment not found." });
+        }
+
+        const activity = activityResult.rows[0];
+        const classroom = await getAccessibleClass(activity.class_id, req.user);
+
+        if (!classroom) {
+          return res
+            .status(403)
+            .json({ message: "You do not have access to this document." });
+        }
+
+        if (!activity.attachment_name) {
+          return res
+            .status(404)
+            .json({ message: "This activity has no attachment." });
+        }
+
+        return res.status(200).json({
+          document: {
+            id: String(activity.id),
+            kind: "activity-attachment",
+            title: activity.activity_title,
+            className: activity.class_name,
+            fileName: activity.attachment_name,
+            fileType: activity.attachment_type,
+            fileSize: activity.attachment_size,
+            dataUrl: activity.attachment_data_url,
+            textContent: null,
+            createdAt: activity.created_at,
+            submittedAt: null,
+            ownerName: null,
+          },
+        });
+      }
+
+      if (documentType === "submission") {
+        const submissionResult = await pool.query(
+          `SELECT s.id, s.activity_id, a.class_id, c.name AS class_name,
+                a.title AS activity_title, s.student_id, u.name AS student_name,
+                s.content_text, s.file_name, s.file_type, s.file_size,
+                s.file_data_url, s.status, s.submitted_at, s.updated_at
+         FROM submissions s
+         INNER JOIN activities a ON a.id = s.activity_id
+         INNER JOIN classes c ON c.id = a.class_id
+         INNER JOIN users u ON u.id = s.student_id
+         WHERE s.id = $1
+         LIMIT 1`,
+          [documentId],
+        );
+
+        if (submissionResult.rows.length === 0) {
+          return res
+            .status(404)
+            .json({ message: "Submission document not found." });
+        }
+
+        const submission = submissionResult.rows[0];
+        const teacherCanView =
+          req.user.role === "teacher" &&
+          (await getAccessibleClass(submission.class_id, req.user));
+        const studentCanView =
+          req.user.role === "student" &&
+          Number(submission.student_id) === Number(req.user.id);
+
+        if (!teacherCanView && !studentCanView) {
+          return res
+            .status(403)
+            .json({ message: "You do not have access to this document." });
+        }
+
+        return res.status(200).json({
+          document: {
+            id: String(submission.id),
+            kind: "submission",
+            title: submission.activity_title,
+            className: submission.class_name,
+            fileName:
+              submission.file_name ?? `${submission.activity_title} essay`,
+            fileType: submission.file_type ?? "text/plain",
+            fileSize: submission.file_size,
+            dataUrl: submission.file_data_url,
+            textContent: submission.content_text,
+            status: submission.status,
+            createdAt: submission.updated_at,
+            submittedAt: submission.submitted_at,
+            ownerName: submission.student_name,
+          },
+        });
+      }
+
+      return res.status(404).json({ message: "Document type not found." });
+    } catch (error) {
+      return res.status(500).json({
+        message: "Failed to load document.",
+        error: error.message,
+      });
+    }
+  },
+);
+
 router.get("/:classId/activities", protect, async (req, res) => {
   try {
     const classId = Number(req.params.classId);
@@ -1344,14 +1828,19 @@ router.get("/:classId/activities", protect, async (req, res) => {
     const classroom = await getAccessibleClass(classId, req.user);
 
     if (!classroom) {
-      return res.status(403).json({ message: "You do not have access to this class." });
+      return res
+        .status(403)
+        .json({ message: "You do not have access to this class." });
     }
 
     if (req.user.role === "student") {
       const result = await pool.query(
-        `SELECT a.id, a.class_id, a.title, a.instructor, a.description, a.submission_type, a.due_date, a.created_at,
+        `SELECT a.id, a.class_id, a.title, a.instructor, a.description, a.submission_type,
+                a.allow_resubmission, a.attachment_name, a.attachment_type,
+                a.attachment_size, a.due_date, a.created_at,
                 s.id AS submission_id, s.status AS submission_status, s.ai_probability, s.is_ai_generated,
-                s.analysis_details, s.submitted_at, s.content_text, s.file_name
+                s.analysis_details, s.submitted_at, s.updated_at, s.content_text,
+                s.file_name, s.file_type, s.file_size, s.submitted_version
          FROM activities a
          LEFT JOIN submissions s ON s.activity_id = a.id AND s.student_id = $2
          WHERE a.class_id = $1
@@ -1363,7 +1852,9 @@ router.get("/:classId/activities", protect, async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT a.id, a.class_id, a.title, a.instructor, a.description, a.submission_type, a.due_date, a.created_at,
+      `SELECT a.id, a.class_id, a.title, a.instructor, a.description, a.submission_type,
+              a.allow_resubmission, a.attachment_name, a.attachment_type, a.attachment_size,
+              a.due_date, a.created_at,
               COALESCE((SELECT COUNT(*) FROM submissions s WHERE s.activity_id = a.id), 0)::int AS submission_count
        FROM activities a
        WHERE a.class_id = $1
@@ -1383,7 +1874,9 @@ router.get("/:classId/activities", protect, async (req, res) => {
 router.post("/:classId/activities", protect, async (req, res) => {
   try {
     if (req.user.role !== "teacher") {
-      return res.status(403).json({ message: "Only teachers can create activities." });
+      return res
+        .status(403)
+        .json({ message: "Only teachers can create activities." });
     }
 
     const classId = Number(req.params.classId);
@@ -1401,7 +1894,18 @@ router.post("/:classId/activities", protect, async (req, res) => {
       return res.status(403).json({ message: "You do not own this class." });
     }
 
-    const { title, instructor, description, submissionType, dueDate } = req.body;
+    const {
+      title,
+      instructor,
+      description,
+      submissionType,
+      dueDate,
+      allowResubmission,
+      attachmentName,
+      attachmentType,
+      attachmentSize,
+      attachmentDataUrl,
+    } = req.body;
 
     if (!title || !instructor || !description || !submissionType || !dueDate) {
       return res.status(400).json({
@@ -1413,14 +1917,44 @@ router.post("/:classId/activities", protect, async (req, res) => {
     const normalizedSubmissionType = String(submissionType).toLowerCase();
 
     if (!["essay", "file"].includes(normalizedSubmissionType)) {
-      return res.status(400).json({ message: "Submission type must be essay or file." });
+      return res
+        .status(400)
+        .json({ message: "Submission type must be essay or file." });
     }
 
+    const attachment = normalizeDocumentUpload({
+      fileName: attachmentName,
+      fileType: attachmentType,
+      fileSize: attachmentSize,
+      fileDataUrl: attachmentDataUrl,
+    });
+
+    const canResubmit =
+      typeof allowResubmission === "boolean" ? allowResubmission : true;
+
     const insert = await pool.query(
-      `INSERT INTO activities (class_id, title, instructor, description, submission_type, due_date)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, class_id, title, instructor, description, submission_type, due_date, created_at`,
-      [classId, title, instructor, description, normalizedSubmissionType, dueDate],
+      `INSERT INTO activities (
+         class_id, title, instructor, description, submission_type,
+         allow_resubmission, attachment_name, attachment_type, attachment_size,
+         attachment_data_url, due_date
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       RETURNING id, class_id, title, instructor, description, submission_type,
+                 allow_resubmission, attachment_name, attachment_type, attachment_size,
+                 due_date, created_at`,
+      [
+        classId,
+        title,
+        instructor,
+        description,
+        normalizedSubmissionType,
+        canResubmit,
+        attachment.fileName,
+        attachment.fileType,
+        attachment.fileSize,
+        attachment.fileDataUrl,
+        dueDate,
+      ],
     );
 
     await pool.query(
@@ -1433,6 +1967,10 @@ router.post("/:classId/activities", protect, async (req, res) => {
       activity: insert.rows[0],
     });
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+
     return res.status(500).json({
       message: "Failed to create activity.",
       error: error.message,
@@ -1440,93 +1978,259 @@ router.post("/:classId/activities", protect, async (req, res) => {
   }
 });
 
-router.post("/activities/:activityId/submissions", protect, async (req, res) => {
-  try {
-    if (req.user.role !== "student") {
-      return res.status(403).json({ message: "Only students can submit activities." });
-    }
+router.post(
+  "/activities/:activityId/submissions",
+  protect,
+  async (req, res) => {
+    try {
+      if (req.user.role !== "student") {
+        return res
+          .status(403)
+          .json({ message: "Only students can submit activities." });
+      }
 
-    const activityId = Number(req.params.activityId);
+      const activityId = Number(req.params.activityId);
 
-    if (!Number.isFinite(activityId)) {
-      return res.status(400).json({ message: "Invalid activity id." });
-    }
+      if (!Number.isFinite(activityId)) {
+        return res.status(400).json({ message: "Invalid activity id." });
+      }
 
-    const activityResult = await pool.query(
-      `SELECT a.id, a.class_id, a.submission_type
+      const activityResult = await pool.query(
+        `SELECT a.id, a.class_id, a.submission_type, a.allow_resubmission
        FROM activities a
        WHERE a.id = $1`,
-      [activityId],
-    );
+        [activityId],
+      );
 
-    if (activityResult.rows.length === 0) {
-      return res.status(404).json({ message: "Activity not found." });
-    }
+      if (activityResult.rows.length === 0) {
+        return res.status(404).json({ message: "Activity not found." });
+      }
 
-    const activity = activityResult.rows[0];
+      const activity = activityResult.rows[0];
 
-    const enrollment = await pool.query(
-      `SELECT id FROM class_enrollments WHERE class_id = $1 AND student_id = $2`,
-      [activity.class_id, req.user.id],
-    );
+      const enrollment = await pool.query(
+        `SELECT id FROM class_enrollments WHERE class_id = $1 AND student_id = $2`,
+        [activity.class_id, req.user.id],
+      );
 
-    if (enrollment.rows.length === 0) {
-      return res.status(403).json({ message: "You are not enrolled in this class." });
-    }
+      if (enrollment.rows.length === 0) {
+        return res
+          .status(403)
+          .json({ message: "You are not enrolled in this class." });
+      }
 
-    const { contentText, fileName, extractedText } = req.body;
+      const {
+        contentText,
+        fileName,
+        fileType,
+        fileSize,
+        fileDataUrl,
+        extractedText,
+      } = req.body;
 
-    // GPTZero integration guide for text + document scanning:
-    // - Essay flow: pass `contentText`.
-    // - File flow: upload document (PDF/DOCX/etc.), extract plain text on your
-    //   upload service, and pass the extracted body via `extractedText`.
-    // analyzeText() and GPTZero checks use this normalized text payload.
-    const normalizedContent = [contentText, extractedText]
-      .find((candidate) => typeof candidate === "string")
-      ?.trim();
+      // GPTZero integration guide for text + document scanning:
+      // - Essay flow: pass `contentText`.
+      // - File flow: upload document (PDF/DOCX/etc.), extract plain text on your
+      //   upload service, and pass the extracted body via `extractedText`.
+      // analyzeText() and GPTZero checks use this normalized text payload.
+      const normalizedContent = [contentText, extractedText]
+        .find((candidate) => typeof candidate === "string")
+        ?.trim();
 
-    if (activity.submission_type === "essay" && !normalizedContent) {
-      return res.status(400).json({ message: "Essay submissions require text content." });
-    }
+      if (activity.submission_type === "essay" && !normalizedContent) {
+        return res
+          .status(400)
+          .json({ message: "Essay submissions require text content." });
+      }
 
-    if (activity.submission_type === "file" && !fileName?.trim()) {
-      return res.status(400).json({ message: "File submissions require a file name." });
-    }
+      if (activity.submission_type === "file" && !fileName?.trim()) {
+        return res
+          .status(400)
+          .json({ message: "File submissions require a file name." });
+      }
 
-    const submission = await pool.query(
-      `INSERT INTO submissions (activity_id, student_id, content_text, file_name)
-       VALUES ($1, $2, $3, $4)
+      const upload = normalizeDocumentUpload({
+        fileName,
+        fileType,
+        fileSize,
+        fileDataUrl,
+      });
+
+      if (activity.submission_type === "file" && !upload.fileName) {
+        return res
+          .status(400)
+          .json({ message: "File submissions require a valid file." });
+      }
+
+      const existingSubmission = await pool.query(
+        `SELECT id, submitted_version
+       FROM submissions
+       WHERE activity_id = $1 AND student_id = $2
+       LIMIT 1`,
+        [activityId, req.user.id],
+      );
+
+      if (
+        existingSubmission.rows.length > 0 &&
+        activity.allow_resubmission === false
+      ) {
+        return res.status(409).json({
+          message: "Resubmission is not allowed for this activity.",
+        });
+      }
+
+      const nextVersion =
+        existingSubmission.rows.length > 0
+          ? Number(existingSubmission.rows[0].submitted_version ?? 1) + 1
+          : 1;
+
+      const submission = await pool.query(
+        `INSERT INTO submissions (
+         activity_id, student_id, content_text, file_name, file_type,
+         file_size, file_data_url, submitted_version
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (activity_id, student_id)
        DO UPDATE SET
          content_text = EXCLUDED.content_text,
          file_name = EXCLUDED.file_name,
+         file_type = EXCLUDED.file_type,
+         file_size = EXCLUDED.file_size,
+         file_data_url = EXCLUDED.file_data_url,
          status = 'pending',
          ai_probability = NULL,
          is_ai_generated = NULL,
          analysis_details = NULL,
+         submitted_version = EXCLUDED.submitted_version,
          submitted_at = NOW(),
          updated_at = NOW()
-      RETURNING id, activity_id, student_id, content_text, file_name, status,
-                 ai_probability, is_ai_generated, analysis_details, submitted_at, updated_at`,
-      [activityId, req.user.id, normalizedContent ?? null, fileName ?? null],
-    );
+      RETURNING id, activity_id, student_id, content_text, file_name, file_type,
+                 file_size, status, ai_probability, is_ai_generated,
+                 analysis_details, submitted_version, submitted_at, updated_at`,
+        [
+          activityId,
+          req.user.id,
+          normalizedContent ?? null,
+          upload.fileName,
+          upload.fileType,
+          upload.fileSize,
+          upload.fileDataUrl,
+          nextVersion,
+        ],
+      );
 
-    return res.status(200).json({
-      message: "Submission saved successfully.",
-      submission: submission.rows[0],
-    });
-  } catch (error) {
-    return res.status(500).json({
-      message: "Failed to submit activity.",
-      error: error.message,
-    });
-  }
-});
+      await pool.query(
+        `INSERT INTO submission_history (
+         submission_id, activity_id, student_id, version, content_text,
+         file_name, file_type, file_size, status
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [
+          submission.rows[0].id,
+          activityId,
+          req.user.id,
+          nextVersion,
+          normalizedContent ?? null,
+          upload.fileName,
+          upload.fileType,
+          upload.fileSize,
+          "pending",
+        ],
+      );
+
+      return res.status(200).json({
+        message: "Submission saved successfully.",
+        submission: submission.rows[0],
+      });
+    } catch (error) {
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({ message: error.message });
+      }
+
+      return res.status(500).json({
+        message: "Failed to submit activity.",
+        error: error.message,
+      });
+    }
+  },
+);
+
+router.delete(
+  "/activities/:activityId/submissions",
+  protect,
+  async (req, res) => {
+    try {
+      if (req.user.role !== "student") {
+        return res
+          .status(403)
+          .json({ message: "Only students can unsubmit activities." });
+      }
+
+      const activityId = Number(req.params.activityId);
+
+      if (!Number.isFinite(activityId)) {
+        return res.status(400).json({ message: "Invalid activity id." });
+      }
+
+      const activityResult = await pool.query(
+        `SELECT a.id, a.class_id, a.allow_resubmission
+       FROM activities a
+       WHERE a.id = $1`,
+        [activityId],
+      );
+
+      if (activityResult.rows.length === 0) {
+        return res.status(404).json({ message: "Activity not found." });
+      }
+
+      const enrollment = await pool.query(
+        `SELECT id FROM class_enrollments WHERE class_id = $1 AND student_id = $2`,
+        [activityResult.rows[0].class_id, req.user.id],
+      );
+
+      if (enrollment.rows.length === 0) {
+        return res
+          .status(403)
+          .json({ message: "You are not enrolled in this class." });
+      }
+
+      if (activityResult.rows[0].allow_resubmission === false) {
+        return res.status(409).json({
+          message: "This activity is locked and cannot be unsubmitted.",
+        });
+      }
+
+      const deleted = await pool.query(
+        `DELETE FROM submissions
+       WHERE activity_id = $1 AND student_id = $2
+       RETURNING id`,
+        [activityId, req.user.id],
+      );
+
+      if (deleted.rows.length === 0) {
+        return res
+          .status(404)
+          .json({ message: "No submitted work found to unsubmit." });
+      }
+
+      return res
+        .status(200)
+        .json({ message: "Submission removed successfully." });
+    } catch (error) {
+      return res.status(500).json({
+        message: "Failed to unsubmit activity.",
+        error: error.message,
+      });
+    }
+  },
+);
 
 router.get("/:classId/students", protect, async (req, res) => {
   try {
     if (req.user.role !== "teacher") {
-      return res.status(403).json({ message: "Only teachers can view enrolled students." });
+      return res
+        .status(403)
+        .json({ message: "Only teachers can view enrolled students." });
     }
 
     const classId = Number(req.params.classId);
@@ -1571,7 +2275,9 @@ router.get("/:classId/students", protect, async (req, res) => {
 router.get("/:classId/submissions", protect, async (req, res) => {
   try {
     if (req.user.role !== "teacher") {
-      return res.status(403).json({ message: "Only teachers can view class submissions." });
+      return res
+        .status(403)
+        .json({ message: "Only teachers can view class submissions." });
     }
 
     const classId = Number(req.params.classId);
@@ -1592,8 +2298,9 @@ router.get("/:classId/submissions", protect, async (req, res) => {
     const submissions = await pool.query(
       `SELECT s.id, s.activity_id, a.title AS activity_title, a.submission_type, a.due_date,
               s.student_id, u.name AS student_name, u.email AS student_email,
-              s.content_text, s.file_name, s.status, s.ai_probability, s.is_ai_generated,
-              s.analysis_details, s.submitted_at, s.updated_at
+              s.content_text, s.file_name, s.file_type, s.file_size,
+              s.status, s.ai_probability, s.is_ai_generated, s.analysis_details,
+              s.submitted_version, s.submitted_at, s.updated_at
        FROM submissions s
        INNER JOIN activities a ON a.id = s.activity_id
        INNER JOIN users u ON u.id = s.student_id
@@ -1614,7 +2321,9 @@ router.get("/:classId/submissions", protect, async (req, res) => {
 router.get("/submissions/:submissionId", protect, async (req, res) => {
   try {
     if (req.user.role !== "teacher") {
-      return res.status(403).json({ message: "Only teachers can view submissions." });
+      return res
+        .status(403)
+        .json({ message: "Only teachers can view submissions." });
     }
 
     const submissionId = Number(req.params.submissionId);
@@ -1627,8 +2336,9 @@ router.get("/submissions/:submissionId", protect, async (req, res) => {
       `SELECT s.id, s.activity_id, a.class_id, c.name AS class_name,
               a.title AS activity_title, a.submission_type, a.due_date,
               s.student_id, u.name AS student_name, u.email AS student_email,
-              s.content_text, s.file_name, s.status, s.ai_probability, s.is_ai_generated,
-              s.analysis_details, s.submitted_at, s.updated_at
+              s.content_text, s.file_name, s.file_type, s.file_size,
+              s.status, s.ai_probability, s.is_ai_generated, s.analysis_details,
+              s.submitted_version, s.submitted_at, s.updated_at
        FROM submissions s
        INNER JOIN activities a ON a.id = s.activity_id
        INNER JOIN classes c ON c.id = a.class_id
@@ -1653,10 +2363,27 @@ router.get("/submissions/:submissionId", protect, async (req, res) => {
   }
 });
 
+const analyzeSubmissionContent = async (submission) => {
+  if (isImageSubmission(submission.file_name, submission.file_type)) {
+    return analyzeImage(submission.file_data_url, submission.file_name);
+  }
+
+  const extractedText = await extractTextFromSubmissionFile({
+    fileName: submission.file_name,
+    fileType: submission.file_type,
+    fileDataUrl: submission.file_data_url,
+    contentText: submission.content_text,
+  });
+
+  return analyzeTextWithService(extractedText);
+};
+
 router.post("/submissions/:submissionId/analyze", protect, async (req, res) => {
   try {
     if (req.user.role !== "teacher") {
-      return res.status(403).json({ message: "Only teachers can analyze submissions." });
+      return res
+        .status(403)
+        .json({ message: "Only teachers can analyze submissions." });
     }
 
     const submissionId = Number(req.params.submissionId);
@@ -1666,7 +2393,7 @@ router.post("/submissions/:submissionId/analyze", protect, async (req, res) => {
     }
 
     const submissionResult = await pool.query(
-      `SELECT s.id, s.content_text, s.file_name
+      `SELECT s.id, s.content_text, s.file_name, s.file_type, s.file_data_url
        FROM submissions s
        INNER JOIN activities a ON a.id = s.activity_id
        INNER JOIN classes c ON c.id = a.class_id
@@ -1682,7 +2409,7 @@ router.post("/submissions/:submissionId/analyze", protect, async (req, res) => {
     }
 
     const submission = submissionResult.rows[0];
-    const analysis = await analyzeText(submission.content_text ?? "");
+    const analysis = await analyzeSubmissionContent(submission);
 
     const updated = await pool.query(
       `UPDATE submissions
@@ -1719,7 +2446,9 @@ router.post("/submissions/:submissionId/analyze", protect, async (req, res) => {
 router.post("/:classId/submissions/analyze", protect, async (req, res) => {
   try {
     if (req.user.role !== "teacher") {
-      return res.status(403).json({ message: "Only teachers can analyze submissions." });
+      return res
+        .status(403)
+        .json({ message: "Only teachers can analyze submissions." });
     }
 
     const classId = Number(req.params.classId);
@@ -1738,7 +2467,7 @@ router.post("/:classId/submissions/analyze", protect, async (req, res) => {
     }
 
     const submissionRows = await pool.query(
-      `SELECT s.id, s.content_text, s.file_name, s.status
+      `SELECT s.id, s.content_text, s.file_name, s.file_type, s.file_data_url, s.status
        FROM submissions s
        INNER JOIN activities a ON a.id = s.activity_id
        WHERE a.class_id = $1
@@ -1747,14 +2476,18 @@ router.post("/:classId/submissions/analyze", protect, async (req, res) => {
     );
 
     if (submissionRows.rows.length === 0) {
-      return res.status(200).json({ message: "No submissions available for analysis.", updated: 0 });
+      return res
+        .status(200)
+        .json({
+          message: "No submissions available for analysis.",
+          updated: 0,
+        });
     }
 
     let updated = 0;
 
     for (const submission of submissionRows.rows) {
-      const textToAnalyze = submission.content_text ?? "";
-      const analysis = await analyzeText(textToAnalyze);
+      const analysis = await analyzeSubmissionContent(submission);
 
       await pool.query(
         `UPDATE submissions
@@ -1771,6 +2504,7 @@ router.post("/:classId/submissions/analyze", protect, async (req, res) => {
           JSON.stringify({
             ...analysis.details,
             fileName: submission.file_name ?? null,
+            fileType: submission.file_type ?? null,
           }),
         ],
       );

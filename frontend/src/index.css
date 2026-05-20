@@ -2,33 +2,35 @@
 @import "tailwindcss";
 
 :root {
-  --app-bg: #d8d5e1;
-  --app-bg-soft: #e8e5ef;
-  --app-surface: #eceaf3;
-  --app-surface-strong: #f4f2f8;
-  --app-text: #384764;
-  --app-muted: #5c6783;
-  --app-accent: #b428ea;
-  --app-accent-2: #e04ba8;
-  --app-border: #d99ff8;
-  --app-ring: rgba(180, 40, 234, 0.3);
-  --app-shadow: 0 20px 45px rgba(65, 45, 110, 0.15);
-  --sidebar-backdrop: rgba(24, 17, 38, 0.42);
+  --app-bg: #f8fbff;
+  --app-bg-soft: #eff6ff;
+  --app-surface: #ffffff;
+  --app-surface-strong: #f5f9ff;
+  --app-text: #0f172a;
+  --app-muted: #526172;
+  --app-accent: #2563eb;
+  --app-accent-2: #38bdf8;
+  --app-border: #bfdbfe;
+  --app-ring: rgba(37, 99, 235, 0.28);
+  --app-shadow: 0 20px 45px rgba(37, 99, 235, 0.12);
+  --app-glow: 0 0 32px rgba(37, 99, 235, 0.22);
+  --sidebar-backdrop: rgba(15, 23, 42, 0.45);
 }
 
 :root.dark {
-  --app-bg: #030106;
-  --app-bg-soft: #08030f;
-  --app-surface: #120621;
-  --app-surface-strong: #1a0a2e;
-  --app-text: #f8f4ff;
-  --app-muted: #c2b5d9;
-  --app-accent: #c43bf2;
-  --app-accent-2: #df4ca7;
-  --app-border: #c058f2;
-  --app-ring: rgba(196, 59, 242, 0.35);
-  --app-shadow: 0 20px 45px rgba(8, 2, 18, 0.48);
-  --sidebar-backdrop: rgba(1, 1, 4, 0.64);
+  --app-bg: #02050d;
+  --app-bg-soft: #06101f;
+  --app-surface: #08111f;
+  --app-surface-strong: #0c1729;
+  --app-text: #f8fafc;
+  --app-muted: #a8b5c8;
+  --app-accent: #38bdf8;
+  --app-accent-2: #22d3ee;
+  --app-border: #1d4ed8;
+  --app-ring: rgba(34, 211, 238, 0.32);
+  --app-shadow: 0 24px 70px rgba(0, 0, 0, 0.46);
+  --app-glow: 0 0 42px rgba(34, 211, 238, 0.24), 0 0 90px rgba(37, 99, 235, 0.14);
+  --sidebar-backdrop: rgba(0, 3, 10, 0.78);
 }
 
 html,
@@ -41,15 +43,22 @@ body {
   font-family: "Sora", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   background: radial-gradient(
       circle at 18% -12%,
-      color-mix(in srgb, var(--app-accent) 20%, transparent),
+      color-mix(in srgb, var(--app-accent) 24%, transparent),
       transparent 42%
     ),
     radial-gradient(
       circle at 86% 5%,
-      color-mix(in srgb, var(--app-accent-2) 18%, transparent),
+      color-mix(in srgb, #4f46e5 18%, transparent),
       transparent 40%
     ),
+    linear-gradient(
+      135deg,
+      var(--app-bg) 0%,
+      var(--app-bg-soft) 46%,
+      color-mix(in srgb, var(--app-bg) 82%, #02050d) 100%
+    ),
     var(--app-bg);
+  background-attachment: fixed;
   color: var(--app-text);
   transition:
     background 220ms ease,
@@ -57,15 +66,38 @@ body {
 }
 
 .theme-surface {
-  background: color-mix(in srgb, var(--app-surface) 93%, transparent);
-  border: 1px solid color-mix(in srgb, var(--app-border) 30%, transparent);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--app-surface) 82%, transparent),
+      color-mix(in srgb, var(--app-surface-strong) 72%, transparent)
+    );
+  border: 1px solid color-mix(in srgb, var(--app-border) 34%, transparent);
+  backdrop-filter: blur(22px) saturate(150%);
   box-shadow: var(--app-shadow);
+  position: relative;
 }
 
 .theme-card {
-  background: color-mix(in srgb, var(--app-surface-strong) 92%, transparent);
-  border: 1px solid color-mix(in srgb, var(--app-border) 24%, transparent);
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--app-surface-strong) 82%, transparent),
+      color-mix(in srgb, var(--app-surface) 64%, transparent)
+    );
+  border: 1px solid color-mix(in srgb, var(--app-border) 28%, transparent);
+  backdrop-filter: blur(18px) saturate(140%);
   box-shadow: var(--app-shadow);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease,
+    background 180ms ease;
+}
+
+.theme-card:hover {
+  border-color: color-mix(in srgb, var(--app-accent) 44%, transparent);
+  box-shadow: var(--app-shadow), var(--app-glow);
 }
 
 .theme-title {
@@ -83,4 +115,53 @@ body {
 .theme-ring:focus-visible {
   outline: none;
   box-shadow: 0 0 0 4px var(--app-ring);
+}
+
+button,
+a,
+input,
+textarea,
+select {
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--app-accent) 35%, transparent);
+  color: var(--app-text);
+}
+
+::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--app-bg) 92%, transparent);
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--app-accent) 36%, transparent);
+  border: 2px solid color-mix(in srgb, var(--app-bg) 92%, transparent);
+  border-radius: 999px;
+}
+
+@keyframes truesight-pulse {
+  0%,
+  100% {
+    opacity: 0.58;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1.025);
+  }
+}
+
+.theme-loading-dot {
+  animation: truesight-pulse 1.4s ease-in-out infinite;
 }

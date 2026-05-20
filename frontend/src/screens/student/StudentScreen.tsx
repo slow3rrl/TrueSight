@@ -1,7 +1,9 @@
 ﻿import { useEffect, useMemo, useState } from "react";
+import { useRef } from "react";
 import { motion } from "framer-motion";
 import { BookOpen, Home, Menu, Plus, Settings, Sparkles } from "lucide-react";
 import toast from "react-hot-toast";
+import { useNavigate } from "react-router-dom";
 import { Button } from "../../components/ui/Button";
 import { Card, CardContent } from "../../components/ui/Card";
 import { Input } from "../../components/ui/Input";
@@ -9,11 +11,15 @@ import { GlobalThemeToggle } from "../../components/theme/GlobalThemeToggle";
 import { ActivityNotificationsPopover } from "../../components/ActivityNotificationsPopover";
 import { useAuth } from "../../context/useAuth";
 import {
+  getHasSeenWelcome,
+  getWelcomeGreeting,
+  markWelcomeSeen,
+} from "../../utils/welcome";
+import {
   fetchClassActivities,
   fetchEnrolledClasses,
   fetchUserNotifications,
   joinClassByCode,
-  submitActivitySubmission,
   type ActivityNotification,
   type ClassActivity,
   type EnrolledClass,
@@ -23,7 +29,6 @@ import {
   type StudentSection,
 } from "./components/StudentSidebar";
 import { StudentEnrolledSection } from "./components/StudentEnrolledSection";
-import { StudentSubmissionModal } from "./components/StudentSubmissionModal";
 import { StudentSettingsPanel } from "./components/StudentSettingsPanel";
 
 const SIDEBAR_ITEMS = [
@@ -33,7 +38,11 @@ const SIDEBAR_ITEMS = [
 ] as const;
 
 export default function StudentScreen() {
-  const { logout } = useAuth();
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  const mainScrollRef = useRef<HTMLElement | null>(null);
+  const joinInputRef = useRef<HTMLInputElement | null>(null);
+  const welcomeSeenRef = useRef<Record<number, boolean>>({});
 
   const [activeSection, setActiveSection] = useState<StudentSection>("home");
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -48,10 +57,6 @@ export default function StudentScreen() {
   const [joinCode, setJoinCode] = useState("");
   const [isJoining, setIsJoining] = useState(false);
 
-  const [submissionActivity, setSubmissionActivity] = useState<ClassActivity | null>(null);
-  const [essayContent, setEssayContent] = useState("");
-  const [fileName, setFileName] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [notifications, setNotifications] = useState<ActivityNotification[]>([]);
   const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -69,6 +74,12 @@ export default function StudentScreen() {
       )
       .slice(0, 4);
   }, [activities]);
+
+  const studentName = user?.name || "Student";
+  const hasSeenWelcome = user
+    ? (welcomeSeenRef.current[user.id] ??= getHasSeenWelcome(user.id))
+    : true;
+  const welcomeGreeting = getWelcomeGreeting(user?.created_at, hasSeenWelcome);
 
   const loadEnrolledClasses = async () => {
     setIsLoadingClasses(true);
@@ -126,6 +137,13 @@ export default function StudentScreen() {
   }, []);
 
   useEffect(() => {
+    if (user?.id) {
+      const timer = window.setTimeout(() => markWelcomeSeen(user.id), 2000);
+      return () => window.clearTimeout(timer);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
     const timer = window.setInterval(() => {
       void loadNotifications();
     }, 60_000);
@@ -143,6 +161,10 @@ export default function StudentScreen() {
 
     void loadClassActivities(selectedClassId);
   }, [selectedClassId]);
+
+  useEffect(() => {
+    mainScrollRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [activeSection, selectedClassId]);
 
   const handleJoinClass = async () => {
     if (!joinCode.trim()) {
@@ -164,54 +186,6 @@ export default function StudentScreen() {
       toast.error(message);
     } finally {
       setIsJoining(false);
-    }
-  };
-
-  const openSubmissionModal = (activity: ClassActivity) => {
-    setSubmissionActivity(activity);
-    setEssayContent(activity.mySubmission?.contentText ?? "");
-    setFileName(activity.mySubmission?.fileName ?? "");
-  };
-
-  const handleSubmitWork = async () => {
-    if (!submissionActivity) {
-      return;
-    }
-
-    if (submissionActivity.submissionType === "essay" && !essayContent.trim()) {
-      toast.error("Essay submission requires text content.");
-      return;
-    }
-
-    if (submissionActivity.submissionType === "file" && !fileName.trim()) {
-      toast.error("Please select a file first.");
-      return;
-    }
-
-    setIsSubmitting(true);
-
-    try {
-      await submitActivitySubmission(submissionActivity.id, {
-        contentText:
-          submissionActivity.submissionType === "essay"
-            ? essayContent.trim()
-            : undefined,
-        fileName: submissionActivity.submissionType === "file" ? fileName : undefined,
-      });
-
-      toast.success("Submission saved successfully.");
-      setSubmissionActivity(null);
-      setEssayContent("");
-      setFileName("");
-
-      if (selectedClassId) {
-        await Promise.all([loadClassActivities(selectedClassId), loadNotifications()]);
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to submit work.";
-      toast.error(message);
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -242,7 +216,7 @@ export default function StudentScreen() {
             <BookOpen className="mr-2 h-4 w-4" />
             Open Enrolled
           </Button>
-          <Button variant="outline" onClick={() => setActiveSection("enrolled")}>
+          <Button variant="outline" onClick={() => joinInputRef.current?.focus()}>
             <Sparkles className="mr-2 h-4 w-4" />
             Join New Class
           </Button>
@@ -287,6 +261,7 @@ export default function StudentScreen() {
           <p className="text-sm font-semibold text-[var(--app-text)]">Join Class by Code</p>
           <div className="flex flex-col gap-3 sm:flex-row">
             <Input
+              ref={joinInputRef}
               value={joinCode}
               onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
               placeholder="e.g. ABC123-XY4"
@@ -314,7 +289,9 @@ export default function StudentScreen() {
         setSelectedClassId(classId);
         setActiveSection("enrolled");
       }}
-      onOpenSubmissionModal={openSubmissionModal}
+      onOpenActivityDetails={(activity) =>
+        navigate(`/student/classes/${activity.classId}/activities/${activity.id}`)
+      }
     />
   );
 
@@ -323,7 +300,7 @@ export default function StudentScreen() {
   );
 
   return (
-    <div className="min-h-screen bg-transparent text-[var(--app-text)]">
+    <div className="h-screen overflow-hidden bg-transparent text-[var(--app-text)]">
       <StudentSidebar
         items={[...SIDEBAR_ITEMS]}
         activeSection={activeSection}
@@ -339,19 +316,21 @@ export default function StudentScreen() {
         onLogout={handleLogout}
       />
 
-      <header className="sticky top-0 z-10 border-b theme-border bg-[color-mix(in_srgb,var(--app-bg)_78%,transparent)] backdrop-blur-md md:ml-20">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-3">
+      <header className="fixed left-0 right-0 top-0 z-10 h-20 border-b theme-border bg-[color-mix(in_srgb,var(--app-bg)_78%,transparent)] backdrop-blur-md md:left-20">
+        <div className="mx-auto flex h-full max-w-6xl items-center justify-between px-4 sm:px-6">
+          <div className="flex min-w-0 items-center gap-3">
             <button
               onClick={() => setMobileSidebarOpen(true)}
               className="theme-ring inline-flex h-10 w-10 items-center justify-center rounded-xl border theme-border text-[var(--app-muted)] hover:bg-[color-mix(in_srgb,var(--app-accent)_10%,transparent)] md:hidden"
             >
               <Menu className="h-5 w-5" />
             </button>
-            <div>
-              <p className="text-xs theme-muted">Student Panel</p>
-              <p className="text-sm font-semibold capitalize text-[var(--app-text)]">
-                {activeSection}
+            <div className="min-w-0">
+              <p className="text-xs theme-muted">
+                Student Panel - {activeSection}
+              </p>
+              <p className="truncate text-base font-semibold text-[var(--app-text)] sm:text-lg">
+                {welcomeGreeting}, {studentName}
               </p>
             </div>
           </div>
@@ -370,22 +349,18 @@ export default function StudentScreen() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-6 pb-10 sm:px-6 md:ml-20">
-        {activeSection === "home" && renderHome()}
-        {activeSection === "enrolled" && renderEnrolled()}
-        {activeSection === "settings" && renderSettings()}
+      <main
+        ref={mainScrollRef}
+        data-route-scroll-container
+        className="fixed inset-x-0 bottom-0 top-20 overflow-y-auto px-4 py-6 pb-10 sm:px-6 md:left-20"
+      >
+        <div className="mx-auto max-w-6xl">
+          {activeSection === "home" && renderHome()}
+          {activeSection === "enrolled" && renderEnrolled()}
+          {activeSection === "settings" && renderSettings()}
+        </div>
       </main>
 
-      <StudentSubmissionModal
-        activity={submissionActivity}
-        essayContent={essayContent}
-        fileName={fileName}
-        isSubmitting={isSubmitting}
-        onChangeEssay={setEssayContent}
-        onSelectFile={setFileName}
-        onClose={() => setSubmissionActivity(null)}
-        onSubmit={handleSubmitWork}
-      />
     </div>
   );
 }

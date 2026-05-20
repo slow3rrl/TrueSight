@@ -1,5 +1,6 @@
 ﻿import { AnimatePresence, motion } from "framer-motion";
-import { Check } from "lucide-react";
+import { useState } from "react";
+import { Check, Eye, FileText, Pencil } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Input } from "../../../components/ui/Input";
 import type { ClassActivity } from "../services/studentClassroomService";
@@ -25,6 +26,19 @@ export function StudentSubmissionModal({
   onClose,
   onSubmit,
 }: StudentSubmissionModalProps) {
+  const [previewActivityId, setPreviewActivityId] = useState<string | null>(null);
+  const isPreviewing = Boolean(activity && previewActivityId === activity.id);
+
+  const isEssay = activity?.submissionType === "essay";
+  const trimmedEssay = essayContent.trim();
+  const trimmedFileName = fileName.trim();
+  const canPreview = activity
+    ? isEssay
+      ? trimmedEssay.length > 0
+      : trimmedFileName.length > 0
+    : false;
+  const hasExistingSubmission = Boolean(activity?.mySubmission);
+
   return (
     <AnimatePresence>
       {activity && (
@@ -45,49 +59,121 @@ export function StudentSubmissionModal({
             className="theme-surface relative w-full max-w-xl rounded-3xl overflow-hidden"
           >
             <div className="border-b theme-border px-6 py-5">
-              <p className="text-sm font-medium theme-title">Submit activity work</p>
+              <p className="text-sm font-medium theme-title">
+                {hasExistingSubmission ? "Edit submitted work" : "Submit activity work"}
+              </p>
               <h3 className="mt-1 text-xl font-bold text-[var(--app-text)]">{activity.title}</h3>
             </div>
 
             <div className="space-y-4 p-6">
-              {activity.submissionType === "essay" ? (
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-[var(--app-text)]">
-                    Essay Content
-                  </label>
-                  <textarea
-                    value={essayContent}
-                    onChange={(event) => onChangeEssay(event.target.value)}
-                    rows={7}
-                    className="theme-ring w-full rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)] px-3 py-2 text-sm text-[var(--app-text)]"
-                    placeholder="Write your essay here..."
-                  />
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-[var(--app-text)]">Upload File</label>
-                  <Input
-                    type="file"
-                    onChange={(event) => {
-                      const selected = event.target.files?.[0];
-                      onSelectFile(selected?.name ?? "");
-                    }}
-                    className="bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)]"
-                  />
-                  {fileName && (
-                    <p className="text-xs theme-muted">Selected file: {fileName}</p>
+              {isPreviewing ? (
+                <div className="space-y-4 rounded-2xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)] p-4">
+                  <div className="flex items-center gap-2">
+                    <Eye className="h-4 w-4 text-[var(--app-accent)]" />
+                    <p className="text-sm font-semibold text-[var(--app-text)]">
+                      Submission Preview
+                    </p>
+                  </div>
+
+                  <div className="grid gap-3 text-sm sm:grid-cols-2">
+                    <div>
+                      <p className="text-xs uppercase tracking-wide theme-muted">Type</p>
+                      <p className="mt-1 font-medium text-[var(--app-text)]">
+                        {isEssay ? "Essay" : "File"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wide theme-muted">Due</p>
+                      <p className="mt-1 font-medium text-[var(--app-text)]">
+                        {new Date(activity.dueDate).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+
+                  {isEssay ? (
+                    <div className="max-h-72 overflow-y-auto rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_92%,transparent)] p-3">
+                      <p className="whitespace-pre-wrap text-sm leading-6 text-[var(--app-text)]">
+                        {trimmedEssay}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3 rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_92%,transparent)] p-3">
+                      <FileText className="h-5 w-5 text-[var(--app-accent)]" />
+                      <p className="text-sm font-medium text-[var(--app-text)]">
+                        {trimmedFileName}
+                      </p>
+                    </div>
                   )}
                 </div>
+              ) : (
+                <>
+                  {activity.submissionType === "essay" ? (
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium text-[var(--app-text)]">
+                        Essay Content
+                      </label>
+                      <textarea
+                        value={essayContent}
+                        onChange={(event) => onChangeEssay(event.target.value)}
+                        rows={7}
+                        className="theme-ring w-full rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)] px-3 py-2 text-sm text-[var(--app-text)]"
+                        placeholder="Write your essay here..."
+                      />
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium text-[var(--app-text)]">
+                        Upload File
+                      </label>
+                      <Input
+                        type="file"
+                        onChange={(event) => {
+                          const selected = event.target.files?.[0];
+                          onSelectFile(selected?.name ?? "");
+                        }}
+                        className="bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)]"
+                      />
+                      {fileName && (
+                        <p className="text-xs theme-muted">Selected file: {fileName}</p>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
 
-              <div className="flex items-center justify-end gap-3 pt-2">
+              <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:justify-end">
                 <Button type="button" variant="outline" onClick={onClose}>
                   Cancel
                 </Button>
-                <Button onClick={onSubmit} disabled={isSubmitting}>
-                  <Check className="mr-2 h-4 w-4" />
-                  {isSubmitting ? "Submitting..." : "Submit Work"}
-                </Button>
+                {isPreviewing ? (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setPreviewActivityId(null)}
+                    >
+                      <Pencil className="mr-2 h-4 w-4" />
+                      Edit
+                    </Button>
+                    <Button onClick={onSubmit} disabled={isSubmitting}>
+                      <Check className="mr-2 h-4 w-4" />
+                      {isSubmitting
+                        ? "Submitting..."
+                        : hasExistingSubmission
+                          ? "Submit Changes"
+                          : "Submit Work"}
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    type="button"
+                    onClick={() => setPreviewActivityId(activity.id)}
+                    disabled={!canPreview}
+                  >
+                    <Eye className="mr-2 h-4 w-4" />
+                    Preview Work
+                  </Button>
+                )}
               </div>
             </div>
           </motion.div>

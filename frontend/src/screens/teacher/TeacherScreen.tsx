@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
+﻿import { useEffect, useState, type FormEvent } from "react";
+import { useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   BookOpen,
@@ -15,7 +16,11 @@ import toast from "react-hot-toast";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { GlobalThemeToggle } from "../../components/theme/GlobalThemeToggle";
-import { Avatar, AvatarFallback, AvatarImage } from "../../components/ui/avatar";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from "../../components/ui/avatar";
 import { useAuth } from "../../context/useAuth";
 import { ActivityNotificationsPopover } from "../../components/ActivityNotificationsPopover";
 import {
@@ -52,6 +57,12 @@ import { TeacherStudentsSection } from "./components/TeacherStudentsSection";
 import { TeacherActivitiesSection } from "./components/TeacherActivitiesSection";
 import { TeacherUpcomingSection } from "./components/TeacherUpcomingSection";
 import { getDisplayInitials } from "../../utils/profileImage";
+import { prepareFileUpload } from "../../utils/documentPreview";
+import {
+  getHasSeenWelcome,
+  getWelcomeGreeting,
+  markWelcomeSeen,
+} from "../../utils/welcome";
 
 type Section = TeacherSection;
 
@@ -60,6 +71,11 @@ type ActivityFormState = {
   instructor: string;
   description: string;
   submissionType: ActivitySubmissionType;
+  allowResubmission: boolean;
+  attachmentName: string;
+  attachmentType: string;
+  attachmentSize: number;
+  attachmentDataUrl: string;
   dueDate: string;
 };
 
@@ -120,20 +136,34 @@ export default function TeacherScreen() {
   const navigate = useNavigate();
   const { section } = useParams<{ section?: string }>();
   const { user, logout } = useAuth();
+  const mainScrollRef = useRef<HTMLElement | null>(null);
+  const welcomeSeenRef = useRef<Record<number, boolean>>({});
 
   const activeSection = resolveSection(section);
 
   const teacherName = user?.name ?? "Teacher";
+  const hasSeenWelcome = user
+    ? (welcomeSeenRef.current[user.id] ??= getHasSeenWelcome(user.id))
+    : true;
+  const welcomeGreeting = getWelcomeGreeting(user?.created_at, hasSeenWelcome);
 
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [classes, setClasses] = useState<TeacherClass[]>([]);
-  const [overviewStudents, setOverviewStudents] = useState<TeacherOverviewStudent[]>([]);
-  const [overviewActivities, setOverviewActivities] = useState<TeacherOverviewActivity[]>([]);
-  const [upcomingActivities, setUpcomingActivities] = useState<TeacherOverviewActivity[]>([]);
+  const [overviewStudents, setOverviewStudents] = useState<
+    TeacherOverviewStudent[]
+  >([]);
+  const [overviewActivities, setOverviewActivities] = useState<
+    TeacherOverviewActivity[]
+  >([]);
+  const [upcomingActivities, setUpcomingActivities] = useState<
+    TeacherOverviewActivity[]
+  >([]);
   const [isLoadingOverview, setIsLoadingOverview] = useState(true);
   const [analytics, setAnalytics] = useState<TeacherAnalytics | null>(null);
   const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(true);
-  const [notifications, setNotifications] = useState<ActivityNotification[]>([]);
+  const [notifications, setNotifications] = useState<ActivityNotification[]>(
+    [],
+  );
   const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
 
@@ -151,19 +181,33 @@ export default function TeacherScreen() {
 
   const [classActivities, setClassActivities] = useState<ClassActivity[]>([]);
   const [classStudents, setClassStudents] = useState<EnrolledStudent[]>([]);
-  const [classSubmissions, setClassSubmissions] = useState<ClassSubmission[]>([]);
+  const [classSubmissions, setClassSubmissions] = useState<ClassSubmission[]>(
+    [],
+  );
 
   const [activityForm, setActivityForm] = useState<ActivityFormState>({
     title: "",
     instructor: teacherName,
     description: "",
     submissionType: "essay",
+    allowResubmission: true,
+    attachmentName: "",
+    attachmentType: "",
+    attachmentSize: 0,
+    attachmentDataUrl: "",
     dueDate: "",
   });
+  const [isPreparingActivityAttachment, setIsPreparingActivityAttachment] =
+    useState(false);
+  const [activityAttachmentProgress, setActivityAttachmentProgress] = useState(0);
   const [isCreatingActivity, setIsCreatingActivity] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analyzingSubmissionId, setAnalyzingSubmissionId] = useState<string | null>(null);
-  const [expandedSubmissionId, setExpandedSubmissionId] = useState<string | null>(null);
+  const [analyzingSubmissionId, setAnalyzingSubmissionId] = useState<
+    string | null
+  >(null);
+  const [expandedSubmissionId, setExpandedSubmissionId] = useState<
+    string | null
+  >(null);
 
   const goToSection = (target: Section) => {
     navigate(`/teacher/teacher_screen/${target}`);
@@ -174,6 +218,10 @@ export default function TeacherScreen() {
       navigate(`/teacher/teacher_screen/${activeSection}`, { replace: true });
     }
   }, [activeSection, navigate, section]);
+
+  useEffect(() => {
+    mainScrollRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [activeSection]);
 
   useEffect(() => {
     setActivityForm((previous) => ({ ...previous, instructor: teacherName }));
@@ -189,7 +237,10 @@ export default function TeacherScreen() {
       setOverviewActivities(overview.activities);
       setUpcomingActivities(overview.upcoming);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load dashboard data.";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to load dashboard data.";
       toast.error(message);
       setClasses([]);
       setOverviewStudents([]);
@@ -208,7 +259,9 @@ export default function TeacherScreen() {
       setAnalytics(payload);
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Failed to load analytics data.";
+        error instanceof Error
+          ? error.message
+          : "Failed to load analytics data.";
       toast.error(message);
       setAnalytics(null);
     } finally {
@@ -224,7 +277,9 @@ export default function TeacherScreen() {
       setNotifications(payload);
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Failed to load notifications.";
+        error instanceof Error
+          ? error.message
+          : "Failed to load notifications.";
       toast.error(message);
       setNotifications([]);
     } finally {
@@ -246,7 +301,10 @@ export default function TeacherScreen() {
       setClassStudents(students);
       setClassSubmissions(submissions);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load class manager.";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to load class manager.";
       toast.error(message);
     } finally {
       setIsLoadingClassManager(false);
@@ -260,6 +318,13 @@ export default function TeacherScreen() {
       loadNotifications(),
     ]);
   }, []);
+
+  useEffect(() => {
+    if (user?.id) {
+      const timer = window.setTimeout(() => markWelcomeSeen(user.id), 2000);
+      return () => window.clearTimeout(timer);
+    }
+  }, [user?.id]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -298,7 +363,9 @@ export default function TeacherScreen() {
     setIsCreatingClass(true);
 
     try {
-      const generatedCode = generateUniqueClassCode(classes.map((classroom) => classroom.code));
+      const generatedCode = generateUniqueClassCode(
+        classes.map((classroom) => classroom.code),
+      );
 
       await createTeacherClass({
         name: `${courseCode.trim()} - ${className.trim()}`,
@@ -313,7 +380,8 @@ export default function TeacherScreen() {
       goToSection("classes");
       toast.success("Class created successfully.");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to create class.";
+      const message =
+        error instanceof Error ? error.message : "Failed to create class.";
       toast.error(message);
     } finally {
       setIsCreatingClass(false);
@@ -329,10 +397,55 @@ export default function TeacherScreen() {
       instructor: teacherName,
       description: "",
       submissionType: "essay",
+      allowResubmission: true,
+      attachmentName: "",
+      attachmentType: "",
+      attachmentSize: 0,
+      attachmentDataUrl: "",
       dueDate: "",
     });
+    setActivityAttachmentProgress(0);
 
     await loadClassManagerData(classroom.id);
+  };
+
+  const handleSelectActivityAttachment = async (file: File | undefined) => {
+    if (!file) {
+      return;
+    }
+
+    setIsPreparingActivityAttachment(true);
+    setActivityAttachmentProgress(0);
+
+    try {
+      const upload = await prepareFileUpload(file, setActivityAttachmentProgress);
+      setActivityForm((previous) => ({
+        ...previous,
+        attachmentName: upload.fileName,
+        attachmentType: upload.fileType,
+        attachmentSize: upload.fileSize,
+        attachmentDataUrl: upload.fileDataUrl,
+      }));
+      toast.success("Attachment ready.");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to prepare attachment.";
+      toast.error(message);
+      setActivityAttachmentProgress(0);
+    } finally {
+      setIsPreparingActivityAttachment(false);
+    }
+  };
+
+  const clearActivityAttachment = () => {
+    setActivityForm((previous) => ({
+      ...previous,
+      attachmentName: "",
+      attachmentType: "",
+      attachmentSize: 0,
+      attachmentDataUrl: "",
+    }));
+    setActivityAttachmentProgress(0);
   };
 
   const handleCreateActivity = async (event: FormEvent) => {
@@ -350,6 +463,11 @@ export default function TeacherScreen() {
         instructor: activityForm.instructor.trim(),
         description: activityForm.description.trim(),
         submissionType: activityForm.submissionType,
+        allowResubmission: activityForm.allowResubmission,
+        attachmentName: activityForm.attachmentName || undefined,
+        attachmentType: activityForm.attachmentType || undefined,
+        attachmentSize: activityForm.attachmentSize || undefined,
+        attachmentDataUrl: activityForm.attachmentDataUrl || undefined,
         dueDate: activityForm.dueDate,
       });
 
@@ -359,8 +477,14 @@ export default function TeacherScreen() {
         instructor: teacherName,
         description: "",
         submissionType: "essay",
+        allowResubmission: true,
+        attachmentName: "",
+        attachmentType: "",
+        attachmentSize: 0,
+        attachmentDataUrl: "",
         dueDate: "",
       });
+      setActivityAttachmentProgress(0);
 
       await Promise.all([
         loadTeacherOverview(),
@@ -369,7 +493,8 @@ export default function TeacherScreen() {
         loadClassManagerData(managedClass.id),
       ]);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to create activity.";
+      const message =
+        error instanceof Error ? error.message : "Failed to create activity.";
       toast.error(message);
     } finally {
       setIsCreatingActivity(false);
@@ -393,7 +518,10 @@ export default function TeacherScreen() {
         loadClassManagerData(managedClass.id),
       ]);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to analyze submissions.";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to analyze submissions.";
       toast.error(message);
     } finally {
       setIsAnalyzing(false);
@@ -422,7 +550,10 @@ export default function TeacherScreen() {
         loadClassManagerData(managedClass.id),
       ]);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to analyze submission.";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to analyze submission.";
       toast.error(message);
     } finally {
       setAnalyzingSubmissionId(null);
@@ -446,7 +577,7 @@ export default function TeacherScreen() {
   );
 
   return (
-    <div className="min-h-screen bg-transparent text-[var(--app-text)]">
+    <div className="h-screen overflow-hidden bg-transparent text-[var(--app-text)]">
       <TeacherSidebar
         items={[...SIDEBAR_ITEMS]}
         activeSection={activeSection}
@@ -456,19 +587,21 @@ export default function TeacherScreen() {
         onLogout={handleLogout}
       />
 
-      <header className="sticky top-0 z-10 border-b theme-border bg-[color-mix(in_srgb,var(--app-bg)_78%,transparent)] backdrop-blur-md md:ml-20">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-3">
+      <header className="fixed left-0 right-0 top-0 z-10 h-20 border-b theme-border bg-[color-mix(in_srgb,var(--app-bg)_78%,transparent)] backdrop-blur-md md:left-20">
+        <div className="mx-auto flex h-full max-w-6xl items-center justify-between px-4 sm:px-6">
+          <div className="flex min-w-0 items-center gap-3">
             <button
               onClick={() => setMobileSidebarOpen(true)}
               className="theme-ring inline-flex h-10 w-10 items-center justify-center rounded-xl border theme-border text-[var(--app-muted)] hover:bg-[color-mix(in_srgb,var(--app-accent)_10%,transparent)] md:hidden"
             >
               <Menu className="h-5 w-5" />
             </button>
-            <div>
-              <p className="text-xs theme-muted">Teacher Panel</p>
-              <p className="text-sm font-semibold capitalize text-[var(--app-text)]">
-                {activeSection}
+            <div className="min-w-0">
+              <p className="text-xs theme-muted">
+                Teacher Panel - {activeSection}
+              </p>
+              <p className="truncate text-base font-semibold text-[var(--app-text)] sm:text-lg">
+                {welcomeGreeting}, {teacherName}
               </p>
             </div>
           </div>
@@ -484,7 +617,9 @@ export default function TeacherScreen() {
               onRefresh={() => void loadNotifications()}
             />
             <Avatar className="h-9 w-9 border theme-border">
-              {user?.profileImageUrl ? <AvatarImage src={user.profileImageUrl} alt={teacherName} /> : null}
+              {user?.profileImageUrl ? (
+                <AvatarImage src={user.profileImageUrl} alt={teacherName} />
+              ) : null}
               <AvatarFallback className="text-xs font-semibold text-[var(--app-text)]">
                 {getDisplayInitials(teacherName)}
               </AvatarFallback>
@@ -493,53 +628,64 @@ export default function TeacherScreen() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-6 pb-10 sm:px-6 md:ml-20">
-        {activeSection === "home" && (
-          <TeacherHomeSection
-            isLoading={isLoadingOverview}
-            isLoadingAnalytics={isLoadingAnalytics}
-            classCount={classes.length}
-            studentCount={overviewStudents.length}
-            activityCount={overviewActivities.length}
-            upcomingCount={upcomingActivities.length}
-            analytics={analytics}
-            onCreateClass={() => setIsCreateModalOpen(true)}
-            onOpenSection={goToSection}
-            onOpenIntegrityAnalytics={() => navigate("/teacher/integrity-analytics")}
-          />
-        )}
+      <main
+        ref={mainScrollRef}
+        data-route-scroll-container
+        className="fixed inset-x-0 bottom-0 top-20 overflow-y-auto px-4 py-6 pb-10 sm:px-6 md:left-20"
+      >
+        <div className="mx-auto max-w-6xl">
+          {activeSection === "home" && (
+            <TeacherHomeSection
+              isLoading={isLoadingOverview}
+              isLoadingAnalytics={isLoadingAnalytics}
+              classCount={classes.length}
+              studentCount={overviewStudents.length}
+              activityCount={overviewActivities.length}
+              upcomingCount={upcomingActivities.length}
+              analytics={analytics}
+              onCreateClass={() => setIsCreateModalOpen(true)}
+              onOpenSection={goToSection}
+              onOpenIntegrityAnalytics={() =>
+                navigate("/teacher/integrity-analytics")
+              }
+            />
+          )}
 
-        {activeSection === "classes" && (
-          <TeacherClassesSection
-            classes={classes}
-            isLoading={isLoadingOverview}
-            latestCreatedCode={latestCreatedCode}
-            copiedCode={copiedCode}
-            onCreateClass={() => setIsCreateModalOpen(true)}
-            onCopyCode={(code) => void handleCopyCode(code)}
-            onManageClass={(classroom) => void openClassManager(classroom)}
-          />
-        )}
+          {activeSection === "classes" && (
+            <TeacherClassesSection
+              classes={classes}
+              isLoading={isLoadingOverview}
+              latestCreatedCode={latestCreatedCode}
+              copiedCode={copiedCode}
+              onCreateClass={() => setIsCreateModalOpen(true)}
+              onCopyCode={(code) => void handleCopyCode(code)}
+              onManageClass={(classroom) => void openClassManager(classroom)}
+            />
+          )}
 
-        {activeSection === "students" && (
-          <TeacherStudentsSection students={overviewStudents} isLoading={isLoadingOverview} />
-        )}
+          {activeSection === "students" && (
+            <TeacherStudentsSection
+              students={overviewStudents}
+              isLoading={isLoadingOverview}
+            />
+          )}
 
-        {activeSection === "activities" && (
-          <TeacherActivitiesSection
-            activities={overviewActivities}
-            isLoading={isLoadingOverview}
-          />
-        )}
+          {activeSection === "activities" && (
+            <TeacherActivitiesSection
+              activities={overviewActivities}
+              isLoading={isLoadingOverview}
+            />
+          )}
 
-        {activeSection === "upcoming" && (
-          <TeacherUpcomingSection
-            upcomingActivities={upcomingActivities}
-            isLoading={isLoadingOverview}
-          />
-        )}
+          {activeSection === "upcoming" && (
+            <TeacherUpcomingSection
+              upcomingActivities={upcomingActivities}
+              isLoading={isLoadingOverview}
+            />
+          )}
 
-        {activeSection === "settings" && renderSettings()}
+          {activeSection === "settings" && renderSettings()}
+        </div>
       </main>
 
       <AnimatePresence>
@@ -561,7 +707,9 @@ export default function TeacherScreen() {
               className="theme-surface relative w-full max-w-xl overflow-hidden rounded-3xl"
             >
               <div className="border-b theme-border px-6 py-5">
-                <p className="text-sm font-medium theme-title">Create a new class</p>
+                <p className="text-sm font-medium theme-title">
+                  Create a new class
+                </p>
                 <h3 className="mt-1 text-xl font-bold text-[var(--app-text)]">
                   Generate a student join code
                 </h3>
@@ -569,7 +717,9 @@ export default function TeacherScreen() {
 
               <form onSubmit={handleCreateClass} className="space-y-4 p-6">
                 <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-[var(--app-text)]">Class Name</label>
+                  <label className="text-sm font-medium text-[var(--app-text)]">
+                    Class Name
+                  </label>
                   <Input
                     value={className}
                     onChange={(event) => setClassName(event.target.value)}
@@ -580,7 +730,9 @@ export default function TeacherScreen() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-[var(--app-text)]">Course Code</label>
+                  <label className="text-sm font-medium text-[var(--app-text)]">
+                    Course Code
+                  </label>
                   <Input
                     value={courseCode}
                     onChange={(event) => setCourseCode(event.target.value)}
@@ -591,7 +743,9 @@ export default function TeacherScreen() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-[var(--app-text)]">Description</label>
+                  <label className="text-sm font-medium text-[var(--app-text)]">
+                    Description
+                  </label>
                   <textarea
                     value={description}
                     onChange={(event) => setDescription(event.target.value)}
@@ -603,7 +757,8 @@ export default function TeacherScreen() {
                 </div>
 
                 <div className="rounded-2xl border border-dashed theme-border bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)] p-4 text-sm theme-muted">
-                  The system generates a unique code so students can join this class.
+                  The system generates a unique code so students can join this
+                  class.
                 </div>
 
                 <div className="flex items-center justify-end gap-3 pt-2">
@@ -637,17 +792,28 @@ export default function TeacherScreen() {
         submissions={classSubmissions}
         activityForm={activityForm}
         isCreatingActivity={isCreatingActivity}
+        isPreparingAttachment={isPreparingActivityAttachment}
+        attachmentProgress={activityAttachmentProgress}
         isAnalyzing={isAnalyzing}
         analyzingSubmissionId={analyzingSubmissionId}
         expandedSubmissionId={expandedSubmissionId}
         onClose={() => setIsClassManagerOpen(false)}
         onAnalyzeAll={handleAnalyzeAll}
-        onAnalyzeSubmission={(submissionId) => void handleAnalyzeSubmission(submissionId)}
-        onOpenSubmissionPage={(submissionId) => navigate(`/teacher/submissions/${submissionId}`)}
+        onAnalyzeSubmission={(submissionId) =>
+          void handleAnalyzeSubmission(submissionId)
+        }
+        onOpenSubmissionPage={(submissionId) =>
+          navigate(`/teacher/submissions/${submissionId}`)
+        }
+        onOpenDocumentPreview={(submissionId) =>
+          navigate(`/documents/submission/${submissionId}`)
+        }
         onOpenAnalysisPage={(submissionId) =>
           navigate(`/teacher/submissions/${submissionId}/analysis`)
         }
         onSubmitActivity={handleCreateActivity}
+        onSelectAttachment={(file) => void handleSelectActivityAttachment(file)}
+        onClearAttachment={clearActivityAttachment}
         onChangeActivityForm={(patch) =>
           setActivityForm((previous) => ({
             ...previous,

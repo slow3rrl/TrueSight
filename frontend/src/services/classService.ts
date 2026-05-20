@@ -78,21 +78,58 @@ export type StudentActivitySubmission = {
   isAIGenerated: boolean | null;
   analysisDetails: SubmissionAnalysisDetails | null;
   submittedAt: string | null;
+  updatedAt: string | null;
   contentText: string | null;
   fileName: string | null;
+  fileType: string | null;
+  fileSize: number | null;
+  submittedVersion: number;
+};
+
+export type ActivityAttachment = {
+  fileName: string;
+  fileType: string | null;
+  fileSize: number | null;
+  documentId: string;
 };
 
 export type ClassActivity = {
   id: string;
   classId: string;
+  className: string | null;
+  classCode: string | null;
   title: string;
   instructor: string;
   description: string;
   submissionType: ActivitySubmissionType;
+  allowResubmission: boolean;
+  attachment: ActivityAttachment | null;
+  teacherName: string | null;
+  teacherProfileImageUrl: string | null;
   dueDate: string;
   createdAt: string;
   submissionCount: number;
   mySubmission: StudentActivitySubmission | null;
+};
+
+export type SubmissionHistoryEntry = {
+  id: string;
+  submissionId: string;
+  activityId: string;
+  studentId: string;
+  version: number;
+  contentText: string | null;
+  fileName: string | null;
+  fileType: string | null;
+  fileSize: number | null;
+  status: string;
+  submittedAt: string;
+};
+
+export type ActivityDetail = {
+  activity: ClassActivity;
+  mySubmission: StudentActivitySubmission | null;
+  history: SubmissionHistoryEntry[];
 };
 
 export type EnrolledStudent = {
@@ -177,14 +214,35 @@ export type ClassSubmission = {
   studentEmail: string;
   contentText: string | null;
   fileName: string | null;
+  fileType: string | null;
+  fileSize: number | null;
   status: string;
   aiProbability: number | null;
   humanProbability: number | null;
   confidenceScore: number | null;
   isAIGenerated: boolean | null;
   analysisDetails: SubmissionAnalysisDetails | null;
+  submittedVersion: number;
   submittedAt: string;
   updatedAt: string;
+};
+
+export type DocumentPreviewType = "activity-attachment" | "submission";
+
+export type PreviewDocument = {
+  id: string;
+  kind: DocumentPreviewType;
+  title: string;
+  className: string | null;
+  fileName: string;
+  fileType: string | null;
+  fileSize: number | null;
+  dataUrl: string | null;
+  textContent: string | null;
+  status: string | null;
+  createdAt: string | null;
+  submittedAt: string | null;
+  ownerName: string | null;
 };
 
 export type SubmissionAnalysisResult = {
@@ -215,10 +273,18 @@ type ApiClass = {
 type ApiActivity = {
   id: number;
   class_id: number;
+  class_name?: string;
+  class_code?: string;
   title: string;
   instructor: string;
   description: string;
   submission_type: ActivitySubmissionType;
+  allow_resubmission?: boolean;
+  attachment_name?: string | null;
+  attachment_type?: string | null;
+  attachment_size?: number | string | null;
+  teacher_name?: string | null;
+  teacher_profile_image_url?: string | null;
   due_date: string;
   created_at: string;
   submission_count?: number;
@@ -228,8 +294,12 @@ type ApiActivity = {
   is_ai_generated?: boolean | null;
   analysis_details?: SubmissionAnalysisDetails | null;
   submitted_at?: string | null;
+  updated_at?: string | null;
   content_text?: string | null;
   file_name?: string | null;
+  file_type?: string | null;
+  file_size?: number | string | null;
+  submitted_version?: number | string | null;
 };
 
 type ApiStudent = {
@@ -278,12 +348,45 @@ type ApiSubmission = {
   student_email: string;
   content_text: string | null;
   file_name: string | null;
+  file_type?: string | null;
+  file_size?: number | string | null;
   status: string;
   ai_probability: number | null;
   is_ai_generated: boolean | null;
   analysis_details: SubmissionAnalysisDetails | null;
+  submitted_version?: number | string | null;
   submitted_at: string;
   updated_at: string;
+};
+
+type ApiSubmissionHistory = {
+  id: number;
+  submission_id: number;
+  activity_id: number;
+  student_id: number;
+  version: number | string;
+  content_text: string | null;
+  file_name: string | null;
+  file_type?: string | null;
+  file_size?: number | string | null;
+  status: string;
+  submitted_at: string;
+};
+
+type ApiPreviewDocument = {
+  id: string | number;
+  kind: DocumentPreviewType;
+  title: string;
+  className?: string | null;
+  fileName: string;
+  fileType?: string | null;
+  fileSize?: number | string | null;
+  dataUrl?: string | null;
+  textContent?: string | null;
+  status?: string | null;
+  createdAt?: string | null;
+  submittedAt?: string | null;
+  ownerName?: string | null;
 };
 
 type ApiTeacherSuspiciousClass = {
@@ -333,7 +436,7 @@ const API_URL = "http://localhost:5000/api/classes";
 async function request<T>(
   path: string,
   options?: {
-    method?: "GET" | "POST";
+    method?: "DELETE" | "GET" | "POST";
     body?: Record<string, unknown>;
   },
 ): Promise<T> {
@@ -427,22 +530,53 @@ const mapStudentSubmission = (item: ApiActivity): StudentActivitySubmission | nu
       typeof item.is_ai_generated === "boolean" ? item.is_ai_generated : null,
     analysisDetails,
     submittedAt: item.submitted_at ?? null,
+    updatedAt: item.updated_at ?? null,
     contentText: item.content_text ?? null,
     fileName: item.file_name ?? null,
+    fileType: item.file_type ?? null,
+    fileSize: asNumber(item.file_size),
+    submittedVersion: asNumber(item.submitted_version) ?? 1,
   };
 };
 
 const mapActivity = (item: ApiActivity): ClassActivity => ({
   id: String(item.id),
   classId: String(item.class_id),
+  className: item.class_name ?? null,
+  classCode: item.class_code ?? null,
   title: item.title,
   instructor: item.instructor,
   description: item.description,
   submissionType: item.submission_type,
+  allowResubmission: item.allow_resubmission !== false,
+  attachment: item.attachment_name
+    ? {
+        fileName: item.attachment_name,
+        fileType: item.attachment_type ?? null,
+        fileSize: asNumber(item.attachment_size),
+        documentId: String(item.id),
+      }
+    : null,
+  teacherName: item.teacher_name ?? null,
+  teacherProfileImageUrl: item.teacher_profile_image_url ?? null,
   dueDate: item.due_date,
   createdAt: item.created_at,
   submissionCount: Number(item.submission_count ?? 0),
   mySubmission: mapStudentSubmission(item),
+});
+
+const mapHistoryEntry = (item: ApiSubmissionHistory): SubmissionHistoryEntry => ({
+  id: String(item.id),
+  submissionId: String(item.submission_id),
+  activityId: String(item.activity_id),
+  studentId: String(item.student_id),
+  version: asNumber(item.version) ?? 1,
+  contentText: item.content_text,
+  fileName: item.file_name,
+  fileType: item.file_type ?? null,
+  fileSize: asNumber(item.file_size),
+  status: item.status,
+  submittedAt: item.submitted_at,
 });
 
 const mapStudent = (item: ApiStudent): EnrolledStudent => ({
@@ -537,6 +671,8 @@ const mapSubmission = (item: ApiSubmission): ClassSubmission => {
     studentEmail: item.student_email,
     contentText: item.content_text,
     fileName: item.file_name,
+    fileType: item.file_type ?? null,
+    fileSize: asNumber(item.file_size),
     status: item.status,
     aiProbability: asNumber(item.ai_probability),
     humanProbability,
@@ -544,10 +680,27 @@ const mapSubmission = (item: ApiSubmission): ClassSubmission => {
     isAIGenerated:
       typeof item.is_ai_generated === "boolean" ? item.is_ai_generated : null,
     analysisDetails,
+    submittedVersion: asNumber(item.submitted_version) ?? 1,
     submittedAt: item.submitted_at,
     updatedAt: item.updated_at,
   };
 };
+
+const mapPreviewDocument = (item: ApiPreviewDocument): PreviewDocument => ({
+  id: String(item.id),
+  kind: item.kind,
+  title: item.title,
+  className: item.className ?? null,
+  fileName: item.fileName,
+  fileType: item.fileType ?? null,
+  fileSize: asNumber(item.fileSize),
+  dataUrl: item.dataUrl ?? null,
+  textContent: item.textContent ?? null,
+  status: item.status ?? null,
+  createdAt: item.createdAt ?? null,
+  submittedAt: item.submittedAt ?? null,
+  ownerName: item.ownerName ?? null,
+});
 
 export async function fetchTeacherClasses(): Promise<TeacherClass[]> {
   const payload = await request<{ classes: ApiClass[] }>("/mine");
@@ -615,6 +768,51 @@ export async function fetchClassActivities(classId: string): Promise<ClassActivi
   return (payload.activities ?? []).map(mapActivity);
 }
 
+export async function fetchActivityDetail(activityId: string): Promise<ActivityDetail> {
+  const payload = await request<{
+    activity: ApiActivity;
+    submission: {
+      id: number;
+      activity_id: number;
+      student_id: number;
+      status: string;
+      ai_probability: number | null;
+      is_ai_generated: boolean | null;
+      analysis_details: SubmissionAnalysisDetails | null;
+      submitted_at: string | null;
+      updated_at: string | null;
+      content_text: string | null;
+      file_name: string | null;
+      file_type?: string | null;
+      file_size?: number | string | null;
+      submitted_version?: number | string | null;
+    } | null;
+    history: ApiSubmissionHistory[];
+  }>(`/activities/${activityId}`);
+
+  const activity = mapActivity({
+    ...payload.activity,
+    submission_id: payload.submission?.id ?? null,
+    submission_status: payload.submission?.status ?? null,
+    ai_probability: payload.submission?.ai_probability ?? null,
+    is_ai_generated: payload.submission?.is_ai_generated ?? null,
+    analysis_details: payload.submission?.analysis_details ?? null,
+    submitted_at: payload.submission?.submitted_at ?? null,
+    updated_at: payload.submission?.updated_at ?? null,
+    content_text: payload.submission?.content_text ?? null,
+    file_name: payload.submission?.file_name ?? null,
+    file_type: payload.submission?.file_type ?? null,
+    file_size: payload.submission?.file_size ?? null,
+    submitted_version: payload.submission?.submitted_version ?? null,
+  });
+
+  return {
+    activity,
+    mySubmission: activity.mySubmission,
+    history: (payload.history ?? []).map(mapHistoryEntry),
+  };
+}
+
 export async function createClassActivity(
   classId: string,
   input: {
@@ -622,6 +820,11 @@ export async function createClassActivity(
     instructor: string;
     description: string;
     submissionType: ActivitySubmissionType;
+    allowResubmission?: boolean;
+    attachmentName?: string;
+    attachmentType?: string;
+    attachmentSize?: number;
+    attachmentDataUrl?: string;
     dueDate: string;
   },
 ): Promise<ClassActivity> {
@@ -638,6 +841,9 @@ export async function submitActivitySubmission(
   input: {
     contentText?: string;
     fileName?: string;
+    fileType?: string;
+    fileSize?: number;
+    fileDataUrl?: string;
     extractedText?: string;
   },
 ): Promise<StudentActivitySubmission> {
@@ -649,8 +855,12 @@ export async function submitActivitySubmission(
       is_ai_generated: boolean | null;
       analysis_details: SubmissionAnalysisDetails | null;
       submitted_at: string;
+      updated_at: string;
       content_text: string | null;
       file_name: string | null;
+      file_type?: string | null;
+      file_size?: number | string | null;
+      submitted_version?: number | string | null;
     };
   }>(`/activities/${activityId}/submissions`, {
     method: "POST",
@@ -669,9 +879,19 @@ export async function submitActivitySubmission(
         : null,
     analysisDetails: payload.submission.analysis_details,
     submittedAt: payload.submission.submitted_at,
+    updatedAt: payload.submission.updated_at,
     contentText: payload.submission.content_text,
     fileName: payload.submission.file_name,
+    fileType: payload.submission.file_type ?? null,
+    fileSize: asNumber(payload.submission.file_size),
+    submittedVersion: asNumber(payload.submission.submitted_version) ?? 1,
   };
+}
+
+export async function unsubmitActivitySubmission(activityId: string): Promise<void> {
+  await request<{ message: string }>(`/activities/${activityId}/submissions`, {
+    method: "DELETE",
+  });
 }
 
 export async function fetchClassStudents(classId: string): Promise<EnrolledStudent[]> {
@@ -696,6 +916,17 @@ export async function fetchSubmissionDetail(
   );
 
   return mapSubmission(payload.submission);
+}
+
+export async function fetchDocumentPreview(
+  documentType: DocumentPreviewType,
+  documentId: string,
+): Promise<PreviewDocument> {
+  const payload = await request<{ document: ApiPreviewDocument }>(
+    `/documents/${documentType}/${documentId}`,
+  );
+
+  return mapPreviewDocument(payload.document);
 }
 
 export async function analyzeSingleSubmission(

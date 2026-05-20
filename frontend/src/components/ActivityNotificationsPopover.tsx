@@ -60,12 +60,7 @@ export function ActivityNotificationsPopover({
     };
   }, [open, onClose]);
 
-  const upcomingCount = useMemo(
-    () =>
-      notifications.filter((notification) => notification.type === "upcoming_deadline")
-        .length,
-    [notifications],
-  );
+  const notificationCount = useMemo(() => notifications.length, [notifications]);
 
   return (
     <div className="relative" ref={containerRef}>
@@ -75,9 +70,9 @@ export function ActivityNotificationsPopover({
       >
         <Bell className="h-5 w-5" />
       </button>
-      {upcomingCount > 0 && (
+      {notificationCount > 0 && (
         <span className="absolute -right-1 -top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">
-          {upcomingCount > 9 ? "9+" : upcomingCount}
+          {notificationCount > 9 ? "9+" : notificationCount}
         </span>
       )}
 

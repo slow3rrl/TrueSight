@@ -137,7 +137,7 @@ export default function SubmissionAnalysisReportPage() {
   const metrics = isRecord(details?.metrics) ? details.metrics : null;
 
   return (
-    <div className="min-h-screen bg-transparent text-[var(--app-text)]">
+    <div className="h-screen overflow-hidden bg-transparent text-[var(--app-text)]">
       <TeacherSidebar
         items={[...SIDEBAR_ITEMS]}
         activeSection={"classes" as TeacherSection}
@@ -147,8 +147,8 @@ export default function SubmissionAnalysisReportPage() {
         onLogout={handleLogout}
       />
 
-      <header className="sticky top-0 z-10 border-b theme-border bg-[color-mix(in_srgb,var(--app-bg)_78%,transparent)] backdrop-blur-md md:ml-20">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
+      <header className="fixed left-0 right-0 top-0 z-10 h-16 border-b theme-border bg-[color-mix(in_srgb,var(--app-bg)_78%,transparent)] backdrop-blur-md md:left-20">
+        <div className="mx-auto flex h-full max-w-6xl items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setMobileSidebarOpen(true)}
@@ -178,7 +178,11 @@ export default function SubmissionAnalysisReportPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl space-y-5 px-4 py-6 pb-10 sm:px-6 md:ml-20">
+      <main
+        data-route-scroll-container
+        className="fixed inset-x-0 bottom-0 top-16 overflow-y-auto px-4 py-6 pb-10 sm:px-6 md:left-20"
+      >
+        <div className="mx-auto max-w-6xl space-y-5">
         <div className="flex flex-wrap items-center gap-3">
           <Button
             variant="outline"
@@ -263,6 +267,7 @@ export default function SubmissionAnalysisReportPage() {
             </Card>
           </>
         )}
+        </div>
       </main>
     </div>
   );

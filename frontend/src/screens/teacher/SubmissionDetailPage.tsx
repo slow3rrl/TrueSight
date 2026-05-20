@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   BookOpen,
   CalendarClock,
+  FileText,
   Home,
   Menu,
   Settings,
@@ -152,7 +153,7 @@ export default function SubmissionDetailPage() {
       : "Not analyzed yet";
 
   return (
-    <div className="min-h-screen bg-transparent text-[var(--app-text)]">
+    <div className="h-screen overflow-hidden bg-transparent text-[var(--app-text)]">
       <TeacherSidebar
         items={[...SIDEBAR_ITEMS]}
         activeSection={"classes" as TeacherSection}
@@ -162,8 +163,8 @@ export default function SubmissionDetailPage() {
         onLogout={handleLogout}
       />
 
-      <header className="sticky top-0 z-10 border-b theme-border bg-[color-mix(in_srgb,var(--app-bg)_78%,transparent)] backdrop-blur-md md:ml-20">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
+      <header className="fixed left-0 right-0 top-0 z-10 h-16 border-b theme-border bg-[color-mix(in_srgb,var(--app-bg)_78%,transparent)] backdrop-blur-md md:left-20">
+        <div className="mx-auto flex h-full max-w-6xl items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setMobileSidebarOpen(true)}
@@ -193,7 +194,11 @@ export default function SubmissionDetailPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl space-y-5 px-4 py-6 pb-10 sm:px-6 md:ml-20">
+      <main
+        data-route-scroll-container
+        className="fixed inset-x-0 bottom-0 top-16 overflow-y-auto px-4 py-6 pb-10 sm:px-6 md:left-20"
+      >
+        <div className="mx-auto max-w-6xl space-y-5">
         <div className="flex flex-wrap items-center gap-3">
           <Button
             variant="outline"
@@ -208,6 +213,15 @@ export default function SubmissionDetailPage() {
               onClick={() => navigate(`/teacher/submissions/${submissionId}/analysis`)}
             >
               Open Analysis Report
+            </Button>
+          )}
+          {submissionId && (
+            <Button
+              variant="outline"
+              onClick={() => navigate(`/documents/submission/${submissionId}`)}
+            >
+              <FileText className="mr-2 h-4 w-4" />
+              Preview Document
             </Button>
           )}
           <Button onClick={() => void handleAnalyze()} disabled={isAnalyzing || !submissionId}>
@@ -268,7 +282,14 @@ export default function SubmissionDetailPage() {
               <CardContent className="space-y-3 p-5">
                 <h3 className="text-lg font-semibold text-[var(--app-text)]">Submission Content</h3>
                 {submission.fileName && (
-                  <p className="text-sm theme-muted">Attached file: {submission.fileName}</p>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/documents/submission/${submission.id}`)}
+                    className="theme-ring inline-flex items-center gap-2 rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_82%,transparent)] px-3 py-2 text-sm text-[var(--app-text)] transition hover:border-[var(--app-accent)]"
+                  >
+                    <FileText className="h-4 w-4 text-[var(--app-accent)]" />
+                    {submission.fileName}
+                  </button>
                 )}
                 {renderSubmissionContent()}
               </CardContent>
@@ -311,6 +332,7 @@ export default function SubmissionDetailPage() {
             </Card>
           </>
         )}
+        </div>
       </main>
     </div>
   );
