@@ -1,3 +1,4 @@
+# TrueSight
 # AI-Powered Academic Integrity Management System
 
 ## Overview
