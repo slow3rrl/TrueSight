@@ -19,6 +19,12 @@ type StudentEnrolledSectionProps = {
   onOpenActivityDetails: (activity: ClassActivity) => void;
 };
 
+const getSubmissionTypeLabel = (type: string) => {
+  if (type === "image") return "Image";
+  if (type === "file") return "File";
+  return "Essay";
+};
+
 export function StudentEnrolledSection({
   enrolledClasses,
   selectedClassId,
@@ -99,7 +105,7 @@ export function StudentEnrolledSection({
                           </p>
                         </div>
                         <span className="rounded-full bg-[color-mix(in_srgb,var(--app-accent)_18%,transparent)] px-2 py-1 text-xs text-[var(--app-accent)]">
-                          {activity.submissionType === "essay" ? "Essay" : "File"}
+                          {getSubmissionTypeLabel(activity.submissionType)}
                         </span>
                       </div>
 

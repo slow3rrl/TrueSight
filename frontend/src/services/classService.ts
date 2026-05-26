@@ -20,9 +20,12 @@ export type EnrolledClass = Omit<
   teacherProfileImageUrl: string | null;
 };
 
-export type ActivitySubmissionType = "essay" | "file";
+export type ActivitySubmissionType = "essay" | "file" | "image";
 
-export type ActivityNotificationType = "new_activity" | "upcoming_deadline";
+export type ActivityNotificationType =
+  | "new_activity"
+  | "upcoming_deadline"
+  | "new_submission";
 
 export type ActivityNotification = {
   id: string;
@@ -431,7 +434,11 @@ type ApiActivityNotification = {
   createdAt?: string | null;
 };
 
-const API_URL = "http://localhost:5000/api/classes";
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL ??
+  (import.meta.env.DEV ? "http://localhost:5000/api" : "/api")
+).replace(/\/$/, "");
+const API_URL = `${API_BASE_URL}/classes`;
 
 async function request<T>(
   path: string,

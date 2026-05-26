@@ -58,7 +58,7 @@ const ensureClassroomSchema = async () => {
       title VARCHAR(255) NOT NULL,
       instructor VARCHAR(255) NOT NULL,
       description TEXT NOT NULL,
-      submission_type VARCHAR(20) NOT NULL CHECK (submission_type IN ('essay', 'file')),
+      submission_type VARCHAR(20) NOT NULL CHECK (submission_type IN ('essay', 'file', 'image')),
       allow_resubmission BOOLEAN NOT NULL DEFAULT TRUE,
       attachment_name VARCHAR(255),
       attachment_type VARCHAR(120),
@@ -76,6 +76,33 @@ const ensureClassroomSchema = async () => {
     ADD COLUMN IF NOT EXISTS attachment_type VARCHAR(120),
     ADD COLUMN IF NOT EXISTS attachment_size BIGINT,
     ADD COLUMN IF NOT EXISTS attachment_data_url TEXT
+  `);
+
+  await pool.query(`
+    DO $$
+    DECLARE
+      existing_constraint_name TEXT;
+    BEGIN
+      SELECT conname INTO existing_constraint_name
+      FROM pg_constraint
+      WHERE conrelid = 'activities'::regclass
+        AND contype = 'c'
+        AND pg_get_constraintdef(oid) LIKE '%submission_type%'
+      LIMIT 1;
+
+      IF existing_constraint_name IS NOT NULL THEN
+        EXECUTE format(
+          'ALTER TABLE activities DROP CONSTRAINT %I',
+          existing_constraint_name
+        );
+      END IF;
+    END $$;
+  `);
+
+  await pool.query(`
+    ALTER TABLE activities
+    ADD CONSTRAINT activities_submission_type_check
+    CHECK (submission_type IN ('essay', 'file', 'image'))
   `);
 
   await pool.query(`
@@ -161,6 +188,7 @@ const protect = async (req, res, next) => {
 };
 
 const MAX_DOCUMENT_DATA_URL_LENGTH = 6_500_000;
+const ACTIVITY_SUBMISSION_TYPES = new Set(["essay", "file", "image"]);
 const SUPPORTED_DOCUMENT_EXTENSIONS = new Set([
   "pdf",
   "doc",
@@ -188,6 +216,17 @@ const SUPPORTED_DOCUMENT_TYPES = [
   "text/csv",
   "application/json",
 ];
+const FILE_SUBMISSION_EXTENSIONS = new Set(["pdf", "docx"]);
+const FILE_SUBMISSION_TYPES = new Set([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]);
+const IMAGE_SUBMISSION_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp"]);
+const IMAGE_SUBMISSION_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+]);
 
 const asTrimmedString = (value) =>
   typeof value === "string" ? value.trim() : "";
@@ -208,6 +247,46 @@ const isSupportedDocument = (fileName, fileType) => {
     SUPPORTED_DOCUMENT_TYPES.includes(normalizedType) ||
     SUPPORTED_DOCUMENT_EXTENSIONS.has(extension)
   );
+};
+
+const hasUploadPayload = ({ fileName, fileType, fileSize, fileDataUrl }) =>
+  Boolean(
+    asTrimmedString(fileName) ||
+      asTrimmedString(fileType) ||
+      asTrimmedString(fileDataUrl) ||
+      fileSize !== undefined,
+  );
+
+const isAllowedFileSubmission = (fileName, fileType) => {
+  const normalizedType = asTrimmedString(fileType).toLowerCase();
+  const extension = getFileExtension(fileName);
+
+  return (
+    FILE_SUBMISSION_TYPES.has(normalizedType) ||
+    FILE_SUBMISSION_EXTENSIONS.has(extension)
+  );
+};
+
+const isAllowedImageSubmission = (fileName, fileType) => {
+  const normalizedType = asTrimmedString(fileType).toLowerCase();
+  const extension = getFileExtension(fileName);
+
+  return (
+    IMAGE_SUBMISSION_TYPES.has(normalizedType) ||
+    IMAGE_SUBMISSION_EXTENSIONS.has(extension)
+  );
+};
+
+const isAllowedSubmissionUpload = (submissionType, fileName, fileType) => {
+  if (submissionType === "file") {
+    return isAllowedFileSubmission(fileName, fileType);
+  }
+
+  if (submissionType === "image") {
+    return isAllowedImageSubmission(fileName, fileType);
+  }
+
+  return false;
 };
 
 const normalizeDocumentUpload = ({
@@ -1003,7 +1082,11 @@ const toISOStringOrNull = (value) => {
 const buildNotificationId = (type, activityId, eventAt) =>
   `${type}:${String(activityId)}:${String(eventAt)}`;
 
-const formatNotifications = ({ newActivities, upcomingActivities }) => {
+const formatNotifications = ({
+  newActivities = [],
+  upcomingActivities = [],
+  newSubmissions = [],
+}) => {
   const now = Date.now();
 
   const newActivityNotifications = newActivities.map((activity) => {
@@ -1023,6 +1106,30 @@ const formatNotifications = ({ newActivities, upcomingActivities }) => {
       message: `${activity.activity_title} was added in ${activity.class_name}.`,
       eventAt,
       dueDate,
+    };
+  });
+
+  const newSubmissionNotifications = newSubmissions.map((submission) => {
+    const eventAt =
+      toISOStringOrNull(submission.submitted_at) ?? new Date().toISOString();
+
+    return {
+      id: buildNotificationId(
+        "new_submission",
+        submission.submission_id,
+        eventAt,
+      ),
+      type: "new_submission",
+      severity: "info",
+      classId: String(submission.class_id),
+      className: submission.class_name,
+      activityId: String(submission.activity_id),
+      activityTitle: submission.activity_title,
+      title: "New student submission",
+      message: `${submission.student_name} submitted ${submission.activity_title} in ${submission.class_name}.`,
+      eventAt,
+      dueDate: toISOStringOrNull(submission.due_date),
+      createdAt: eventAt,
     };
   });
 
@@ -1054,13 +1161,15 @@ const formatNotifications = ({ newActivities, upcomingActivities }) => {
     };
   });
 
-  return [...upcomingDeadlineNotifications, ...newActivityNotifications].sort(
-    (left, right) => {
-      const leftTime = new Date(left.eventAt).getTime();
-      const rightTime = new Date(right.eventAt).getTime();
-      return rightTime - leftTime;
-    },
-  );
+  return [
+    ...newSubmissionNotifications,
+    ...upcomingDeadlineNotifications,
+    ...newActivityNotifications,
+  ].sort((left, right) => {
+    const leftTime = new Date(left.eventAt).getTime();
+    const rightTime = new Date(right.eventAt).getTime();
+    return rightTime - leftTime;
+  });
 };
 
 router.get("/mine", protect, async (req, res) => {
@@ -1145,33 +1254,48 @@ router.get("/notifications", protect, async (req, res) => {
       return res.status(200).json({ notifications });
     }
 
-    const [newActivitiesResult, upcomingActivitiesResult] = await Promise.all([
-      pool.query(
-        `SELECT a.id AS activity_id, a.class_id, c.name AS class_name,
-                a.title AS activity_title, a.created_at, a.due_date
-         FROM activities a
-         INNER JOIN classes c ON c.id = a.class_id
-         WHERE c.teacher_id = $1
-           AND a.created_at >= NOW() - INTERVAL '24 hours'
-         ORDER BY a.created_at DESC`,
-        [userId],
-      ),
-      pool.query(
-        `SELECT a.id AS activity_id, a.class_id, c.name AS class_name,
-                a.title AS activity_title, a.created_at, a.due_date
-         FROM activities a
-         INNER JOIN classes c ON c.id = a.class_id
-         WHERE c.teacher_id = $1
-           AND a.due_date > NOW()
-           AND a.due_date <= NOW() + INTERVAL '1 hour'
-         ORDER BY a.due_date ASC`,
-        [userId],
-      ),
-    ]);
+    const [newActivitiesResult, upcomingActivitiesResult, newSubmissionsResult] =
+      await Promise.all([
+        pool.query(
+          `SELECT a.id AS activity_id, a.class_id, c.name AS class_name,
+                  a.title AS activity_title, a.created_at, a.due_date
+           FROM activities a
+           INNER JOIN classes c ON c.id = a.class_id
+           WHERE c.teacher_id = $1
+             AND a.created_at >= NOW() - INTERVAL '24 hours'
+           ORDER BY a.created_at DESC`,
+          [userId],
+        ),
+        pool.query(
+          `SELECT a.id AS activity_id, a.class_id, c.name AS class_name,
+                  a.title AS activity_title, a.created_at, a.due_date
+           FROM activities a
+           INNER JOIN classes c ON c.id = a.class_id
+           WHERE c.teacher_id = $1
+             AND a.due_date > NOW()
+             AND a.due_date <= NOW() + INTERVAL '1 hour'
+           ORDER BY a.due_date ASC`,
+          [userId],
+        ),
+        pool.query(
+          `SELECT s.id AS submission_id, s.submitted_at,
+                  a.id AS activity_id, a.class_id, a.title AS activity_title,
+                  a.due_date, c.name AS class_name, u.name AS student_name
+           FROM submissions s
+           INNER JOIN activities a ON a.id = s.activity_id
+           INNER JOIN classes c ON c.id = a.class_id
+           INNER JOIN users u ON u.id = s.student_id
+           WHERE c.teacher_id = $1
+             AND s.submitted_at >= NOW() - INTERVAL '24 hours'
+           ORDER BY s.submitted_at DESC`,
+          [userId],
+        ),
+      ]);
 
     const notifications = formatNotifications({
       newActivities: newActivitiesResult.rows,
       upcomingActivities: upcomingActivitiesResult.rows,
+      newSubmissions: newSubmissionsResult.rows,
     });
 
     return res.status(200).json({ notifications });
@@ -1916,10 +2040,10 @@ router.post("/:classId/activities", protect, async (req, res) => {
 
     const normalizedSubmissionType = String(submissionType).toLowerCase();
 
-    if (!["essay", "file"].includes(normalizedSubmissionType)) {
+    if (!ACTIVITY_SUBMISSION_TYPES.has(normalizedSubmissionType)) {
       return res
         .status(400)
-        .json({ message: "Submission type must be essay or file." });
+        .json({ message: "Submission type must be essay, file, or image." });
     }
 
     const attachment = normalizeDocumentUpload({
@@ -2028,25 +2152,57 @@ router.post(
         extractedText,
       } = req.body;
 
-      // GPTZero integration guide for text + document scanning:
-      // - Essay flow: pass `contentText`.
-      // - File flow: upload document (PDF/DOCX/etc.), extract plain text on your
-      //   upload service, and pass the extracted body via `extractedText`.
-      // analyzeText() and GPTZero checks use this normalized text payload.
-      const normalizedContent = [contentText, extractedText]
-        .find((candidate) => typeof candidate === "string")
-        ?.trim();
+      const normalizedEssayContent =
+        typeof contentText === "string" ? contentText.trim() : "";
+      const hasTypedContent = Boolean(normalizedEssayContent);
+      const hasExtractedText =
+        typeof extractedText === "string" && Boolean(extractedText.trim());
+      const hasSubmittedUpload = hasUploadPayload({
+        fileName,
+        fileType,
+        fileSize,
+        fileDataUrl,
+      });
 
-      if (activity.submission_type === "essay" && !normalizedContent) {
+      if (activity.submission_type === "essay" && !hasTypedContent) {
         return res
           .status(400)
           .json({ message: "Essay submissions require text content." });
       }
 
-      if (activity.submission_type === "file" && !fileName?.trim()) {
+      if (
+        activity.submission_type === "essay" &&
+        (hasSubmittedUpload || hasExtractedText)
+      ) {
+        return res.status(400).json({
+          message: "Essay activities only accept typed essay text.",
+        });
+      }
+
+      if (
+        ["file", "image"].includes(activity.submission_type) &&
+        (hasTypedContent || hasExtractedText)
+      ) {
+        return res.status(400).json({
+          message:
+            activity.submission_type === "file"
+              ? "File activities only accept document uploads."
+              : "Image activities only accept image uploads.",
+        });
+      }
+
+      if (
+        ["file", "image"].includes(activity.submission_type) &&
+        !fileName?.trim()
+      ) {
         return res
           .status(400)
-          .json({ message: "File submissions require a file name." });
+          .json({
+            message:
+              activity.submission_type === "file"
+                ? "File submissions require a PDF or DOCX file."
+                : "Image submissions require an image file.",
+          });
       }
 
       const upload = normalizeDocumentUpload({
@@ -2056,10 +2212,34 @@ router.post(
         fileDataUrl,
       });
 
-      if (activity.submission_type === "file" && !upload.fileName) {
+      if (
+        ["file", "image"].includes(activity.submission_type) &&
+        (!upload.fileName || !upload.fileDataUrl)
+      ) {
         return res
           .status(400)
-          .json({ message: "File submissions require a valid file." });
+          .json({
+            message:
+              activity.submission_type === "file"
+                ? "File submissions require a valid PDF or DOCX file."
+                : "Image submissions require a valid image file.",
+          });
+      }
+
+      if (
+        ["file", "image"].includes(activity.submission_type) &&
+        !isAllowedSubmissionUpload(
+          activity.submission_type,
+          upload.fileName,
+          upload.fileType,
+        )
+      ) {
+        return res.status(415).json({
+          message:
+            activity.submission_type === "file"
+              ? "File activities only accept PDF or DOCX documents."
+              : "Image activities only accept PNG, JPG, JPEG, or WEBP images.",
+        });
       }
 
       const existingSubmission = await pool.query(
@@ -2110,7 +2290,7 @@ router.post(
         [
           activityId,
           req.user.id,
-          normalizedContent ?? null,
+          activity.submission_type === "essay" ? normalizedEssayContent : null,
           upload.fileName,
           upload.fileType,
           upload.fileSize,
@@ -2130,7 +2310,7 @@ router.post(
           activityId,
           req.user.id,
           nextVersion,
-          normalizedContent ?? null,
+          activity.submission_type === "essay" ? normalizedEssayContent : null,
           upload.fileName,
           upload.fileType,
           upload.fileSize,

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
+import { GoogleLogin } from "@react-oauth/google";
 import { Loader2, Lock, Mail, School, ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
+import { useGoogleAuthConfig } from "../context/GoogleAuthProvider";
 import type { UserRole } from "../context/auth-types";
 
 type FormErrors = {
@@ -21,7 +23,8 @@ const getErrorMessage = (error: unknown): string => {
 
 export default function LoginScreen() {
   const navigate = useNavigate();
-  const { signIn, user, loading } = useAuth();
+  const { signIn, signInWithGoogle, user, loading } = useAuth();
+  const googleAuth = useGoogleAuthConfig();
 
   const [role, setRole] = useState<UserRole>("student");
   const [email, setEmail] = useState("");
@@ -32,8 +35,10 @@ export default function LoginScreen() {
   });
   const [errors, setErrors] = useState<FormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
 
-  const isBusy = isSubmitting || loading;
+  const googleClientConfigured = googleAuth.configured;
+  const isBusy = isSubmitting || isGoogleSubmitting || loading;
 
   const validationErrors = useMemo<FormErrors>(() => {
     const next: FormErrors = {};
@@ -64,20 +69,13 @@ export default function LoginScreen() {
   useEffect(() => {
     if (!user) return;
 
-    if (user.role !== role) {
-      setErrors({
-        role: `This account is registered as ${user.role}, not ${role}.`,
-      });
-      return;
-    }
-
     if (user.role === "teacher") {
       navigate("/teacher/teacher_screen/home", { replace: true });
       return;
     }
 
     navigate("/student/student_screen", { replace: true });
-  }, [user, role, navigate]);
+  }, [user, navigate]);
 
   const handleLogin = async () => {
     const nextErrors: FormErrors = { ...validationErrors };
@@ -96,6 +94,24 @@ export default function LoginScreen() {
       setErrors({ general: getErrorMessage(error) });
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleGoogleCredential = async (credential?: string) => {
+    if (!credential) {
+      setErrors({ general: "Google did not return a credential. Please try again." });
+      return;
+    }
+
+    try {
+      setIsGoogleSubmitting(true);
+      setErrors({});
+      await signInWithGoogle(credential, role);
+      toast.success("Signed in with Google.");
+    } catch (error) {
+      setErrors({ general: getErrorMessage(error) });
+    } finally {
+      setIsGoogleSubmitting(false);
     }
   };
 
@@ -230,12 +246,53 @@ export default function LoginScreen() {
                 </>
               )}
             </button>
+
+            <div className="flex items-center gap-3">
+              <div className="h-px flex-1 bg-[color-mix(in_srgb,var(--app-border)_72%,transparent)]" />
+              <span className="text-xs font-medium uppercase tracking-wide theme-muted">
+                or
+              </span>
+              <div className="h-px flex-1 bg-[color-mix(in_srgb,var(--app-border)_72%,transparent)]" />
+            </div>
+
+            <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_88%,transparent)] p-3">
+              <p className="mb-3 text-xs theme-muted">
+                Google sign-in will use the selected role for new accounts.
+              </p>
+              {googleAuth.loading ? (
+                <div className="flex items-center gap-2 rounded-lg border theme-border px-3 py-2 text-xs theme-muted">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--app-accent)]" />
+                  Checking Google sign-in...
+                </div>
+              ) : googleClientConfigured ? (
+                <div className={isBusy ? "pointer-events-none opacity-65" : ""}>
+                  <GoogleLogin
+                    width="100%"
+                    text="signin_with"
+                    onSuccess={(response) => void handleGoogleCredential(response.credential)}
+                    onError={() => {
+                      setErrors({ general: "Google login failed. Please try again." });
+                    }}
+                  />
+                </div>
+              ) : (
+                <div className="rounded-lg border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                  {googleAuth.message}
+                </div>
+              )}
+              {isGoogleSubmitting && (
+                <div className="mt-3 flex items-center gap-2 text-xs theme-muted">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--app-accent)]" />
+                  Verifying Google account...
+                </div>
+              )}
+            </div>
           </div>
 
           <button
             type="button"
             onClick={() => navigate("/auth/signup_screen")}
-            className="pl-17 mt-5 text-sm theme-muted transition hover:text-[var(--app-accent)]"
+            className="mx-auto mt-5 block w-full text-center text-sm theme-muted transition hover:text-[var(--app-accent)]"
           >
             Don&apos;t have an account?{" "}
             <span className="font-semibold text-[var(--app-accent)]">Sign up here</span>

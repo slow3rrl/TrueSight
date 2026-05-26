@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { useAppContext } from '../../context/AppContext';
 import { Bell, Moon, Sun, Camera, Save, User as UserIcon, Check, Settings as SettingsIcon, LogOut } from 'lucide-react';
 import { motion } from "framer-motion";
+import { LogoutConfirmationDialog } from '../../components/LogoutConfirmationDialog';
 
 export const Profile = () => {
   const { currentUser, updateProfile } = useAppContext();
@@ -195,13 +196,12 @@ export const Profile = () => {
 
         {/* Logout Section */}
         <div className="flex justify-start">
-          <button
-            onClick={handleLogout}
-            className="flex items-center space-x-2 px-6 py-3 bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40 rounded-xl font-medium transition-colors shadow-sm"
-          >
-            <LogOut className="w-5 h-5" />
-            <span>Sign Out</span>
-          </button>
+          <LogoutConfirmationDialog onConfirm={handleLogout}>
+            <button className="flex items-center space-x-2 px-6 py-3 bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40 rounded-xl font-medium transition-colors shadow-sm">
+              <LogOut className="w-5 h-5" />
+              <span>Sign Out</span>
+            </button>
+          </LogoutConfirmationDialog>
         </div>
 
       </div>

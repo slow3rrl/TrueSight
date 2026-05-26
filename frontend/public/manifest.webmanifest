@@ -1,0 +1,44 @@
+{
+  "name": "TrueSight Classroom Integrity",
+  "short_name": "TrueSight",
+  "description": "Cross-platform classroom submissions, integrity analytics, and AI analysis reports.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "browser"],
+  "orientation": "any",
+  "background_color": "#0f172a",
+  "theme_color": "#111827",
+  "categories": ["education", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "48x48",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Student Dashboard",
+      "short_name": "Student",
+      "description": "Open the student workspace.",
+      "url": "/student/student_screen",
+      "icons": [{ "src": "/pwa-icon.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Teacher Dashboard",
+      "short_name": "Teacher",
+      "description": "Open the teacher workspace.",
+      "url": "/teacher/teacher_screen/home",
+      "icons": [{ "src": "/pwa-icon.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+    }
+  ]
+}

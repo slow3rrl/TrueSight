@@ -37,6 +37,12 @@ const getDueState = (dueDate: string, submitted: boolean) => {
   return new Date(dueDate).getTime() < Date.now() ? "Overdue" : "Open";
 };
 
+const getSubmissionTypeLabel = (type: string) => {
+  if (type === "image") return "Image";
+  if (type === "file") return "File";
+  return "Essay";
+};
+
 export default function StudentActivityDetailsPage() {
   const navigate = useNavigate();
   const { classId, activityId } = useParams<{
@@ -146,7 +152,7 @@ export default function StudentActivityDetailsPage() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <span className="rounded-full border theme-border bg-[color-mix(in_srgb,var(--app-accent)_14%,transparent)] px-3 py-1 text-xs font-semibold text-[var(--app-accent)]">
-                      {activity.submissionType === "essay" ? "Essay" : "File"} activity
+                      {getSubmissionTypeLabel(activity.submissionType)} activity
                     </span>
                     <span className="rounded-full border theme-border bg-[color-mix(in_srgb,var(--app-surface)_82%,transparent)] px-3 py-1 text-xs font-semibold text-[var(--app-text)]">
                       {dueState}

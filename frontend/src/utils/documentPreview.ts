@@ -16,6 +16,8 @@ export type PreparedFileUpload = {
   extractedText?: string;
 };
 
+export type UploadPurpose = "activity-attachment" | "file-submission" | "image-submission";
+
 const DRAFT_PREFIX = "truesight-draft-document:";
 const MAX_PREVIEW_FILE_SIZE = 5 * 1024 * 1024;
 const SUPPORTED_EXTENSIONS = new Set([
@@ -32,6 +34,8 @@ const SUPPORTED_EXTENSIONS = new Set([
   "csv",
   "json",
 ]);
+const FILE_SUBMISSION_EXTENSIONS = new Set(["pdf", "docx"]);
+const IMAGE_SUBMISSION_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp"]);
 
 const getExtension = (fileName: string) =>
   fileName.toLowerCase().split(".").pop() ?? "";
@@ -52,11 +56,36 @@ export const formatFileSize = (size: number | null): string => {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 };
 
-export const isSupportedPreviewFile = (file: File): boolean =>
-  SUPPORTED_EXTENSIONS.has(getExtension(file.name));
+export const isSupportedPreviewFile = (
+  file: File,
+  purpose: UploadPurpose = "activity-attachment",
+): boolean => {
+  const extension = getExtension(file.name);
 
-export const validatePreviewFile = (file: File): string | null => {
-  if (!isSupportedPreviewFile(file)) {
+  if (purpose === "file-submission") {
+    return FILE_SUBMISSION_EXTENSIONS.has(extension);
+  }
+
+  if (purpose === "image-submission") {
+    return IMAGE_SUBMISSION_EXTENSIONS.has(extension);
+  }
+
+  return SUPPORTED_EXTENSIONS.has(extension);
+};
+
+export const validatePreviewFile = (
+  file: File,
+  purpose: UploadPurpose = "activity-attachment",
+): string | null => {
+  if (!isSupportedPreviewFile(file, purpose)) {
+    if (purpose === "file-submission") {
+      return "File activities only accept PDF or DOCX documents.";
+    }
+
+    if (purpose === "image-submission") {
+      return "Image activities only accept PNG, JPG, JPEG, or WEBP images.";
+    }
+
     return "Upload PDF, DOC, DOCX, image, or text-based files.";
   }
 
@@ -113,8 +142,9 @@ const readFileAsText = (file: File): Promise<string | undefined> =>
 export const prepareFileUpload = async (
   file: File,
   onProgress?: (progress: number) => void,
+  purpose: UploadPurpose = "activity-attachment",
 ): Promise<PreparedFileUpload> => {
-  const validationError = validatePreviewFile(file);
+  const validationError = validatePreviewFile(file, purpose);
 
   if (validationError) {
     throw new Error(validationError);

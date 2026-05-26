@@ -7,6 +7,12 @@ type TeacherActivitiesSectionProps = {
   isLoading: boolean;
 };
 
+const getSubmissionTypeLabel = (type: string) => {
+  if (type === "image") return "Image";
+  if (type === "file") return "File";
+  return "Essay";
+};
+
 export function TeacherActivitiesSection({
   activities,
   isLoading,
@@ -50,7 +56,7 @@ export function TeacherActivitiesSection({
 
                   <div className="flex items-center gap-3 text-xs theme-muted">
                     <span className="rounded-full bg-[color-mix(in_srgb,var(--app-accent)_16%,transparent)] px-2 py-1 text-[var(--app-accent)]">
-                      {activity.submissionType === "essay" ? "Essay" : "File"}
+                      {getSubmissionTypeLabel(activity.submissionType)}
                     </span>
                     <span>{activity.submissionCount} submissions</span>
                     <span>Instructor: {activity.instructor}</span>

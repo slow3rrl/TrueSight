@@ -3,6 +3,7 @@ import {
   Bell,
   CalendarClock,
   RefreshCw,
+  Send,
   Sparkles,
   TriangleAlert,
 } from "lucide-react";
@@ -106,7 +107,9 @@ export function ActivityNotificationsPopover({
                 >
                   <div className="mb-1 flex items-start justify-between gap-3">
                     <div className="flex items-center gap-2">
-                      {notification.type === "new_activity" ? (
+                      {notification.type === "new_submission" ? (
+                        <Send className="h-4 w-4 text-[var(--app-accent)]" />
+                      ) : notification.type === "new_activity" ? (
                         <Sparkles className="h-4 w-4 text-[var(--app-accent)]" />
                       ) : notification.severity === "warning" ? (
                         <TriangleAlert className="h-4 w-4 text-rose-300" />

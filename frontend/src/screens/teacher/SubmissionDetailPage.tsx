@@ -139,7 +139,7 @@ export default function SubmissionDetailPage() {
 
     return (
       <div className="rounded-xl border border-dashed theme-border bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)] p-4 text-sm theme-muted">
-        No text content is available. File-only submission.
+        No typed essay content is available for this submission.
       </div>
     );
   };
@@ -221,7 +221,7 @@ export default function SubmissionDetailPage() {
               onClick={() => navigate(`/documents/submission/${submissionId}`)}
             >
               <FileText className="mr-2 h-4 w-4" />
-              Preview Document
+              Preview Submission
             </Button>
           )}
           <Button onClick={() => void handleAnalyze()} disabled={isAnalyzing || !submissionId}>

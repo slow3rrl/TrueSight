@@ -300,7 +300,7 @@ export default function SignupScreen() {
           <button
             type="button"
             onClick={() => navigate("/auth/login_screen")}
-            className="pl-20 mt-5 text-sm theme-muted transition hover:text-[var(--app-accent)]"
+            className="mx-auto mt-5 block w-full text-center text-sm theme-muted transition hover:text-[var(--app-accent)]"
           >
             Already have an account?{" "}
             <span className="font-semibold text-[var(--app-accent)]">Login</span>

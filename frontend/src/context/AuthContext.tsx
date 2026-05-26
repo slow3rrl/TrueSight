@@ -4,7 +4,11 @@ import type { AuthContextType, AuthUser, UserRole } from "./auth-types";
 // eslint-disable-next-line react-refresh/only-export-components
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const API_URL = "http://localhost:5000/api/auth";
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL ??
+  (import.meta.env.DEV ? "http://localhost:5000/api" : "/api")
+).replace(/\/$/, "");
+const API_URL = `${API_BASE_URL}/auth`;
 const DARK_MODE_KEY = "darkMode";
 const LEGACY_THEME_KEY = "truesight-theme";
 
@@ -120,6 +124,43 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       setUser(normalizeUser((payload.user as Record<string, unknown>) ?? null));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const signInWithGoogle = async (
+    credential: string,
+    role: UserRole,
+  ): Promise<void> => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/google`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({ credential, role }),
+      });
+
+      const payload = (await response.json()) as Record<string, unknown>;
+
+      if (!response.ok) {
+        throw new Error(
+          typeof payload.message === "string"
+            ? payload.message
+            : "Google login failed.",
+        );
+      }
+
+      const profile = normalizeUser((payload.user as Record<string, unknown>) ?? null);
+
+      if (!profile) {
+        throw new Error("Failed to parse Google account profile.");
+      }
+
+      setUser(profile);
     } finally {
       setLoading(false);
     }
@@ -255,6 +296,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         darkMode,
         toggleTheme,
         signIn,
+        signInWithGoogle,
         signUp,
         getMyProfile,
         updateAccount,

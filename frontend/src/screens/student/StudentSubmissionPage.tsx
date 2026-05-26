@@ -7,9 +7,11 @@ import {
 } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
+  AlertTriangle,
   ArrowLeft,
   CheckCircle2,
   FileUp,
+  Image as ImageIcon,
   Loader2,
   Send,
   Trash2,
@@ -19,6 +21,17 @@ import { motion } from "framer-motion";
 import toast from "react-hot-toast";
 import { Button } from "../../components/ui/Button";
 import { Card, CardContent } from "../../components/ui/Card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../../components/ui/alert-dialog";
 import { GlobalThemeToggle } from "../../components/theme/GlobalThemeToggle";
 import {
   fetchActivityDetail,
@@ -42,6 +55,20 @@ const formatDateTime = (value: string | null) => {
   return Number.isFinite(date.getTime()) ? date.toLocaleString() : "Not available";
 };
 
+const getSubmissionTypeLabel = (type: string) => {
+  if (type === "image") return "Image";
+  if (type === "file") return "File";
+  return "Essay";
+};
+
+const getAcceptedFileTypes = (type: string) =>
+  type === "image" ? ".png,.jpg,.jpeg,.webp" : ".pdf,.docx";
+
+const getUploadHelpText = (type: string) =>
+  type === "image"
+    ? "PNG, JPG, JPEG, or WEBP images up to 5 MB."
+    : "PDF or DOCX documents up to 5 MB.";
+
 export default function StudentSubmissionPage() {
   const navigate = useNavigate();
   const { activityId } = useParams<{ activityId: string }>();
@@ -57,6 +84,7 @@ export default function StudentSubmissionPage() {
   const [isPreparingFile, setIsPreparingFile] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUnsubmitting, setIsUnsubmitting] = useState(false);
+  const [unsubmitDialogOpen, setUnsubmitDialogOpen] = useState(false);
 
   const activity = detail?.activity ?? null;
   const submission = detail?.mySubmission ?? null;
@@ -96,7 +124,13 @@ export default function StudentSubmissionPage() {
     setUploadProgress(0);
 
     try {
-      const upload = await prepareFileUpload(file, setUploadProgress);
+      const upload = await prepareFileUpload(
+        file,
+        setUploadProgress,
+        activity.submissionType === "image"
+          ? "image-submission"
+          : "file-submission",
+      );
       const previewId = saveDraftDocument(
         upload,
         activity.title,
@@ -105,7 +139,11 @@ export default function StudentSubmissionPage() {
 
       setPreparedUpload(upload);
       setDraftPreviewId(previewId);
-      toast.success("File ready for preview.");
+      toast.success(
+        activity.submissionType === "image"
+          ? "Image ready for preview."
+          : "File ready for preview.",
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to prepare file.";
       toast.error(message);
@@ -148,7 +186,12 @@ export default function StudentSubmissionPage() {
     }
 
     if (activity.submissionType === "file" && !preparedUpload) {
-      toast.error("Please upload a supported file first.");
+      toast.error("Please upload a PDF or DOCX document first.");
+      return;
+    }
+
+    if (activity.submissionType === "image" && !preparedUpload) {
+      toast.error("Please upload a supported image first.");
       return;
     }
 
@@ -158,11 +201,16 @@ export default function StudentSubmissionPage() {
       await submitActivitySubmission(activityId, {
         contentText:
           activity.submissionType === "essay" ? essayContent.trim() : undefined,
-        fileName: preparedUpload?.fileName,
-        fileType: preparedUpload?.fileType,
-        fileSize: preparedUpload?.fileSize,
-        fileDataUrl: preparedUpload?.fileDataUrl,
-        extractedText: preparedUpload?.extractedText,
+        fileName:
+          activity.submissionType === "essay" ? undefined : preparedUpload?.fileName,
+        fileType:
+          activity.submissionType === "essay" ? undefined : preparedUpload?.fileType,
+        fileSize:
+          activity.submissionType === "essay" ? undefined : preparedUpload?.fileSize,
+        fileDataUrl:
+          activity.submissionType === "essay"
+            ? undefined
+            : preparedUpload?.fileDataUrl,
       });
 
       toast.success(submission ? "Submission updated." : "Submission saved.");
@@ -175,13 +223,8 @@ export default function StudentSubmissionPage() {
     }
   };
 
-  const handleUnsubmit = async () => {
+  const handleConfirmUnsubmit = async () => {
     if (!activity || !activityId || !submission || locked || isUnsubmitting) {
-      return;
-    }
-
-    const confirmed = window.confirm("Unsubmit this work?");
-    if (!confirmed) {
       return;
     }
 
@@ -189,6 +232,7 @@ export default function StudentSubmissionPage() {
     try {
       await unsubmitActivitySubmission(activityId);
       toast.success("Submission removed.");
+      setUnsubmitDialogOpen(false);
       setPreparedUpload(null);
       setDraftPreviewId(null);
       await loadDetail();
@@ -279,7 +323,7 @@ export default function StudentSubmissionPage() {
                       <input
                         ref={inputRef}
                         type="file"
-                        accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv,.json"
+                        accept={getAcceptedFileTypes(activity.submissionType)}
                         className="hidden"
                         onChange={handleFileInput}
                       />
@@ -298,12 +342,16 @@ export default function StudentSubmissionPage() {
                           locked ? "cursor-not-allowed opacity-60" : "",
                         ].join(" ")}
                       >
-                        <UploadCloud className="h-10 w-10 text-[var(--app-accent)]" />
+                        {activity.submissionType === "image" ? (
+                          <ImageIcon className="h-10 w-10 text-[var(--app-accent)]" />
+                        ) : (
+                          <UploadCloud className="h-10 w-10 text-[var(--app-accent)]" />
+                        )}
                         <p className="mt-3 font-semibold text-[var(--app-text)]">
-                          Drop your document here
+                          Drop your {getSubmissionTypeLabel(activity.submissionType).toLowerCase()} here
                         </p>
                         <p className="mt-1 max-w-sm text-sm theme-muted">
-                          PDF, DOCX, images, and text files up to 5 MB.
+                          {getUploadHelpText(activity.submissionType)}
                         </p>
                       </button>
 
@@ -326,7 +374,11 @@ export default function StudentSubmissionPage() {
                         <div className="rounded-2xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_82%,transparent)] p-4">
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div className="flex items-center gap-3">
-                              <FileUp className="h-5 w-5 text-[var(--app-accent)]" />
+                              {activity.submissionType === "image" ? (
+                                <ImageIcon className="h-5 w-5 text-[var(--app-accent)]" />
+                              ) : (
+                                <FileUp className="h-5 w-5 text-[var(--app-accent)]" />
+                              )}
                               <div>
                                 <p className="font-medium text-[var(--app-text)]">
                                   {preparedUpload.fileName}
@@ -400,7 +452,7 @@ export default function StudentSubmissionPage() {
                       variant="outline"
                       onClick={() => navigate(`/documents/submission/${submission.id}`)}
                     >
-                      Preview Submitted File
+                      Preview Submitted Work
                     </Button>
                   )}
                 </CardContent>
@@ -429,19 +481,81 @@ export default function StudentSubmissionPage() {
                     {submission ? "Submit Changes" : "Submit Work"}
                   </Button>
                   {submission && (
-                    <Button
-                      className="w-full"
-                      variant="destructive"
-                      onClick={() => void handleUnsubmit()}
-                      disabled={isUnsubmitting || locked}
+                    <AlertDialog
+                      open={unsubmitDialogOpen}
+                      onOpenChange={(open) => {
+                        if (!isUnsubmitting) {
+                          setUnsubmitDialogOpen(open);
+                        }
+                      }}
                     >
-                      {isUnsubmitting ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="mr-2 h-4 w-4" />
-                      )}
-                      Unsubmit
-                    </Button>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          className="w-full"
+                          variant="destructive"
+                          disabled={isUnsubmitting || locked}
+                        >
+                          {isUnsubmitting ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="mr-2 h-4 w-4" />
+                          )}
+                          Unsubmit Work
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent className="theme-card border theme-border bg-[var(--app-surface)] text-[var(--app-text)]">
+                        <AlertDialogHeader className="items-center text-center sm:items-start sm:text-left">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-rose-500/15 text-rose-300">
+                            <AlertTriangle className="h-6 w-6" />
+                          </div>
+                          <AlertDialogTitle>
+                            Are you sure you want to unsubmit?
+                          </AlertDialogTitle>
+                          <AlertDialogDescription className="theme-muted">
+                            This will remove your current submitted work for{" "}
+                            <span className="font-medium text-[var(--app-text)]">
+                              {activity.title}
+                            </span>
+                            . You can submit again only if this activity still allows
+                            resubmission.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_82%,transparent)] p-3 text-sm">
+                          <p className="font-medium text-[var(--app-text)]">
+                            Version {submission.submittedVersion}
+                          </p>
+                          <p className="mt-1 theme-muted">
+                            Submitted {formatDateTime(submission.submittedAt)}
+                          </p>
+                          {submission.fileName && (
+                            <p className="mt-1 theme-muted">
+                              {submission.fileName} -{" "}
+                              {formatFileSize(submission.fileSize)}
+                            </p>
+                          )}
+                        </div>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel disabled={isUnsubmitting}>
+                            Keep Submission
+                          </AlertDialogCancel>
+                          <AlertDialogAction
+                            disabled={isUnsubmitting}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              void handleConfirmUnsubmit();
+                            }}
+                            className="bg-rose-600 text-white hover:bg-rose-700"
+                          >
+                            {isUnsubmitting ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="mr-2 h-4 w-4" />
+                            )}
+                            Yes, Unsubmit
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   )}
                 </CardContent>
               </Card>

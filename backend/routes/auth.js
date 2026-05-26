@@ -1,9 +1,11 @@
 import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { OAuth2Client } from "google-auth-library";
 import pool from "../config/db.js";
 
 const router = express.Router();
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 let authSchemaReady = false;
 const MAX_PROFILE_IMAGE_LENGTH = 2_000_000;
@@ -26,7 +28,15 @@ const ensureAuthSchema = async () => {
 
   await pool.query(`
     ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS profile_image_url TEXT
+    ADD COLUMN IF NOT EXISTS profile_image_url TEXT,
+    ADD COLUMN IF NOT EXISTS google_id VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS profile_picture TEXT
+  `);
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS users_google_id_unique
+    ON users (google_id)
+    WHERE google_id IS NOT NULL
   `);
 
   await pool.query(`
@@ -55,7 +65,8 @@ const ensureUserPreferences = async (userId, notificationsEnabled = true) => {
 const getUserProfileById = async (userId) => {
   const user = await pool.query(
     `SELECT u.id, u.name, u.email, u.role, u.created_at,
-            u.profile_image_url,
+            COALESCE(u.profile_image_url, u.profile_picture) AS profile_image_url,
+            u.profile_picture,
             COALESCE(up.notifications_enabled, TRUE) AS notifications
      FROM users u
      LEFT JOIN user_preferences up ON up.user_id = u.id
@@ -156,7 +167,8 @@ router.post("/login", async (req, res) => {
 
     const user = await pool.query(
       `SELECT u.id, u.name, u.email, u.password, u.role, u.created_at,
-              u.profile_image_url,
+              COALESCE(u.profile_image_url, u.profile_picture) AS profile_image_url,
+              u.profile_picture,
               COALESCE(up.notifications_enabled, TRUE) AS notifications
        FROM users u
        LEFT JOIN user_preferences up ON up.user_id = u.id
@@ -185,7 +197,9 @@ router.post("/login", async (req, res) => {
     res.cookie("token", token, cookieOptions);
 
     return res.status(200).json({
+      success: true,
       message: "Login successful.",
+      token,
       user: {
         id: userData.id,
         name: userData.name,
@@ -199,6 +213,137 @@ router.post("/login", async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       message: "Server error during login.",
+      error: error.message,
+    });
+  }
+});
+
+router.get("/google/config", async (_req, res) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID ?? "";
+
+  return res.status(200).json({
+    configured: Boolean(clientId),
+    clientId: clientId || null,
+  });
+});
+
+router.post("/google", async (req, res) => {
+  try {
+    await ensureAuthSchema();
+
+    const { credential, role } = req.body;
+    const normalizedRole = role === "teacher" ? "teacher" : "student";
+
+    if (!credential || typeof credential !== "string") {
+      return res.status(400).json({ message: "Missing Google credential." });
+    }
+
+    if (!process.env.GOOGLE_CLIENT_ID) {
+      return res.status(500).json({
+        message: "Google authentication is not configured on the server.",
+      });
+    }
+
+    let payload;
+
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+      payload = ticket.getPayload();
+    } catch {
+      return res.status(401).json({ message: "Invalid Google credential." });
+    }
+
+    if (!payload) {
+      return res.status(401).json({ message: "Invalid Google credential." });
+    }
+
+    const googleId = String(payload.sub ?? "").trim();
+    const email = String(payload.email ?? "").trim().toLowerCase();
+    const name = String(payload.name ?? email.split("@")[0] ?? "Google User").trim();
+    const picture =
+      typeof payload.picture === "string" && payload.picture.trim()
+        ? payload.picture.trim()
+        : null;
+
+    if (!googleId) {
+      return res.status(401).json({ message: "Invalid Google credential." });
+    }
+
+    if (!email) {
+      return res.status(400).json({ message: "Google account email is missing." });
+    }
+
+    if (payload.email_verified === false) {
+      return res.status(401).json({
+        message: "Google account email is not verified.",
+      });
+    }
+
+    const existing = await pool.query(
+      `SELECT id, google_id, profile_image_url, profile_picture
+       FROM users
+       WHERE google_id = $1 OR LOWER(email) = $2
+       ORDER BY CASE WHEN google_id = $1 THEN 0 ELSE 1 END
+       LIMIT 1`,
+      [googleId, email],
+    );
+
+    let userId;
+
+    if (existing.rows.length > 0) {
+      const user = existing.rows[0];
+      userId = user.id;
+
+      if (user.google_id && user.google_id !== googleId) {
+        return res.status(409).json({
+          message: "This email is already linked to another Google account.",
+        });
+      }
+
+      await pool.query(
+        `UPDATE users
+         SET google_id = COALESCE(google_id, $2),
+             profile_picture = COALESCE(profile_picture, $3),
+             profile_image_url = COALESCE(profile_image_url, $3)
+         WHERE id = $1`,
+        [userId, googleId, picture],
+      );
+    } else {
+      const generatedPassword = await bcrypt.hash(
+        `google:${googleId}:${Date.now()}`,
+        10,
+      );
+
+      const created = await pool.query(
+        `INSERT INTO users (
+           name, email, password, role, google_id, profile_image_url, profile_picture
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $6)
+         RETURNING id`,
+        [name || email, email, generatedPassword, normalizedRole, googleId, picture],
+      );
+
+      userId = created.rows[0].id;
+    }
+
+    await ensureUserPreferences(userId, true);
+
+    const profile = await getUserProfileById(userId);
+    const token = generateToken(userId);
+    res.cookie("token", token, cookieOptions);
+
+    return res.status(200).json({
+      success: true,
+      message: "Google login successful.",
+      token,
+      user: profile,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Server error during Google login.",
       error: error.message,
     });
   }

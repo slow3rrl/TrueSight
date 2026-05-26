@@ -53,6 +53,12 @@ type TeacherClassManagerModalProps = {
   getProbabilityTone: (probability: number | null) => string;
 };
 
+const getSubmissionTypeLabel = (type: ActivitySubmissionType) => {
+  if (type === "image") return "Images";
+  if (type === "file") return "Files";
+  return "Essays";
+};
+
 export function TeacherClassManagerModal({
   open,
   classroom,
@@ -191,6 +197,7 @@ export function TeacherClassManagerModal({
                           >
                             <option value="essay">Essays</option>
                             <option value="file">Files</option>
+                            <option value="image">Images</option>
                           </select>
                           <Input
                             type="datetime-local"
@@ -346,6 +353,9 @@ export function TeacherClassManagerModal({
                                     <p className="mt-1 text-sm text-[var(--app-text)]">
                                       {submission.activityTitle}
                                     </p>
+                                    <p className="mt-1 text-xs theme-muted">
+                                      {getSubmissionTypeLabel(submission.submissionType)} activity
+                                    </p>
                                   </div>
 
                                   <div className="text-right">
@@ -394,7 +404,7 @@ export function TeacherClassManagerModal({
                                     variant="ghost"
                                     onClick={() => onOpenDocumentPreview(submission.id)}
                                   >
-                                    Preview Document
+                                    Preview Submission
                                   </Button>
 
                                   <Button

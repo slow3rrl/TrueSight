@@ -1,6 +1,6 @@
 ﻿import { AnimatePresence, motion } from "framer-motion";
 import { useState } from "react";
-import { Check, Eye, FileText, Pencil } from "lucide-react";
+import { Check, Eye, FileText, Image as ImageIcon, Pencil } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Input } from "../../../components/ui/Input";
 import type { ClassActivity } from "../services/studentClassroomService";
@@ -16,6 +16,15 @@ type StudentSubmissionModalProps = {
   onSubmit: () => void;
 };
 
+const getSubmissionTypeLabel = (type: string) => {
+  if (type === "image") return "Image";
+  if (type === "file") return "File";
+  return "Essay";
+};
+
+const getAcceptedFileTypes = (type: string) =>
+  type === "image" ? ".png,.jpg,.jpeg,.webp" : ".pdf,.docx";
+
 export function StudentSubmissionModal({
   activity,
   essayContent,
@@ -30,6 +39,7 @@ export function StudentSubmissionModal({
   const isPreviewing = Boolean(activity && previewActivityId === activity.id);
 
   const isEssay = activity?.submissionType === "essay";
+  const isImage = activity?.submissionType === "image";
   const trimmedEssay = essayContent.trim();
   const trimmedFileName = fileName.trim();
   const canPreview = activity
@@ -79,7 +89,7 @@ export function StudentSubmissionModal({
                     <div>
                       <p className="text-xs uppercase tracking-wide theme-muted">Type</p>
                       <p className="mt-1 font-medium text-[var(--app-text)]">
-                        {isEssay ? "Essay" : "File"}
+                        {getSubmissionTypeLabel(activity.submissionType)}
                       </p>
                     </div>
                     <div>
@@ -98,7 +108,11 @@ export function StudentSubmissionModal({
                     </div>
                   ) : (
                     <div className="flex items-center gap-3 rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_92%,transparent)] p-3">
-                      <FileText className="h-5 w-5 text-[var(--app-accent)]" />
+                      {isImage ? (
+                        <ImageIcon className="h-5 w-5 text-[var(--app-accent)]" />
+                      ) : (
+                        <FileText className="h-5 w-5 text-[var(--app-accent)]" />
+                      )}
                       <p className="text-sm font-medium text-[var(--app-text)]">
                         {trimmedFileName}
                       </p>
@@ -123,10 +137,11 @@ export function StudentSubmissionModal({
                   ) : (
                     <div className="space-y-1.5">
                       <label className="text-sm font-medium text-[var(--app-text)]">
-                        Upload File
+                        Upload {getSubmissionTypeLabel(activity.submissionType)}
                       </label>
                       <Input
                         type="file"
+                        accept={getAcceptedFileTypes(activity.submissionType)}
                         onChange={(event) => {
                           const selected = event.target.files?.[0];
                           onSelectFile(selected?.name ?? "");

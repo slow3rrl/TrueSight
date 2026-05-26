@@ -16,6 +16,7 @@ export type AuthContextType = {
   darkMode: boolean;
   toggleTheme: () => void;
   signIn: (email: string, password: string) => Promise<void>;
+  signInWithGoogle: (credential: string, role: UserRole) => Promise<void>;
   signUp: (
     name: string,
     email: string,

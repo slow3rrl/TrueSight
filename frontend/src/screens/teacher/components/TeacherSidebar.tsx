@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
 import { LogOut, X } from "lucide-react";
+import { LogoutConfirmationDialog } from "../../../components/LogoutConfirmationDialog";
 
 export type TeacherSection =
   | "home"
@@ -111,23 +112,24 @@ export function TeacherSidebar({
         />
 
         <div className="mt-auto border-t theme-border pt-4">
-          <button
-            onClick={onLogout}
-            className={[
-              "theme-ring flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm",
-              "text-rose-400 transition-all duration-200 hover:bg-rose-500/10",
-            ].join(" ")}
-          >
-            <LogOut className="h-4 w-4 shrink-0" />
-            <span
+          <LogoutConfirmationDialog onConfirm={onLogout}>
+            <button
               className={[
-                "overflow-hidden whitespace-nowrap transition-all duration-200",
-                hovered ? "max-w-[180px] opacity-100" : "max-w-0 opacity-0",
+                "theme-ring flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm",
+                "text-rose-400 transition-all duration-200 hover:bg-rose-500/10",
               ].join(" ")}
             >
-              Logout
-            </span>
-          </button>
+              <LogOut className="h-4 w-4 shrink-0" />
+              <span
+                className={[
+                  "overflow-hidden whitespace-nowrap transition-all duration-200",
+                  hovered ? "max-w-[180px] opacity-100" : "max-w-0 opacity-0",
+                ].join(" ")}
+              >
+                Logout
+              </span>
+            </button>
+          </LogoutConfirmationDialog>
         </div>
       </aside>
 
@@ -170,16 +172,17 @@ export function TeacherSidebar({
               />
 
               <div className="mt-auto border-t theme-border pt-4">
-                <button
-                  onClick={() => {
+                <LogoutConfirmationDialog
+                  onConfirm={() => {
                     onLogout();
                     onCloseMobile();
                   }}
-                  className="theme-ring flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-rose-400 transition-all duration-200 hover:bg-rose-500/10"
                 >
-                  <LogOut className="h-4 w-4 shrink-0" />
-                  <span>Logout</span>
-                </button>
+                  <button className="theme-ring flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-rose-400 transition-all duration-200 hover:bg-rose-500/10">
+                    <LogOut className="h-4 w-4 shrink-0" />
+                    <span>Logout</span>
+                  </button>
+                </LogoutConfirmationDialog>
               </div>
             </motion.aside>
           </>

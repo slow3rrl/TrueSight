@@ -1,6 +1,4 @@
-# =========================================
-# Logs
-# =========================================
+
 logs
 *.log
 npm-debug.log*
@@ -9,25 +7,18 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# =========================================
-# Node Modules
-# =========================================
 node_modules/
 frontend/node_modules/
 backend/node_modules/
 
-# =========================================
-# Build Folders
-# =========================================
+
 dist/
 dist-ssr/
 build/
 frontend/dist/
 backend/dist/
 
-# =========================================
-# Environment Variables
-# =========================================
+
 .env
 .env.local
 .env.development.local
@@ -37,24 +28,17 @@ backend/dist/
 frontend/.env
 backend/.env
 
-# =========================================
-# Local Config Files
-# =========================================
+
 *.local
 
-# =========================================
-# Uploaded Files
-# =========================================
+
 backend/uploads/
 
-# =========================================
-# AI Models
-# =========================================
-backend/models/image-detector/
 
-# =========================================
-# Editor Directories & Files
-# =========================================
+backend/models/image-detector/
+backend/models/image_model/
+
+
 .vscode/*
 !.vscode/extensions.json
 .idea/
@@ -67,19 +51,12 @@ Thumbs.db
 *.sln
 *.sw?
 
-# =========================================
-# Cache
-# =========================================
+
 .cache/
 .tmp/
 
-# =========================================
-# Coverage
-# =========================================
 coverage/
 
-# =========================================
-# Database Files
-# =========================================
+
 *.sqlite
 *.db

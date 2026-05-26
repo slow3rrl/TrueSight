@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router'
 import { Camera, Sun, Moon, LogOut, X, Bell, BellOff, Edit2, Check } from 'lucide-react'
 import { useTheme } from '../theme/ThemeContext';
 import { Button } from './ui/Button'
+import { LogoutConfirmationDialog } from './LogoutConfirmationDialog'
 
 interface ProfileSectionProps {
   userName: string
@@ -211,13 +212,14 @@ export function ProfileSection({
           )}
 
           {/* Logout Button */}
-          <Button
-            onClick={handleLogout}
-            className="w-full p-4 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-950/50 rounded-2xl flex items-center justify-center gap-3 transition-colors font-semibold"
-          >
-            <LogOut className="w-5 h-5" />
-            Logout
-          </Button>
+          <LogoutConfirmationDialog onConfirm={handleLogout}>
+            <Button
+              className="w-full p-4 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-950/50 rounded-2xl flex items-center justify-center gap-3 transition-colors font-semibold"
+            >
+              <LogOut className="w-5 h-5" />
+              Logout
+            </Button>
+          </LogoutConfirmationDialog>
         </div>
       </div>
     </div>
