@@ -1,5 +1,13 @@
 ﻿import { AnimatePresence, motion } from "framer-motion";
-import { FileText, Plus, WandSparkles, X } from "lucide-react";
+import {
+  CalendarClock,
+  FileText,
+  Image as ImageIcon,
+  Loader2,
+  Plus,
+  WandSparkles,
+  X,
+} from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card, CardContent } from "../../../components/ui/Card";
 import { Input } from "../../../components/ui/Input";
@@ -39,6 +47,7 @@ type TeacherClassManagerModalProps = {
   isAnalyzing: boolean;
   analyzingSubmissionId: string | null;
   expandedSubmissionId: string | null;
+  focusedActivityId?: string | null;
   onClose: () => void;
   onAnalyzeAll: () => void;
   onAnalyzeSubmission: (submissionId: string) => void;
@@ -50,13 +59,60 @@ type TeacherClassManagerModalProps = {
   onClearAttachment: () => void;
   onChangeActivityForm: (patch: Partial<ActivityFormState>) => void;
   onToggleSubmission: (submissionId: string) => void;
-  getProbabilityTone: (probability: number | null) => string;
 };
 
 const getSubmissionTypeLabel = (type: ActivitySubmissionType) => {
   if (type === "image") return "Images";
   if (type === "file") return "Files";
   return "Essays";
+};
+
+const getDisplayPrediction = (submission: ClassSubmission) => {
+  const prediction =
+    typeof submission.analysisDetails?.finalPrediction === "string"
+      ? submission.analysisDetails.finalPrediction
+      : null;
+
+  if (prediction === "AI-generated") return "Likely AI-generated";
+  if (prediction === "Human") return "Likely Human-created";
+  if (prediction === "Needs Review") return "Needs Manual Review";
+
+  return typeof submission.aiProbability === "number"
+    ? `${submission.aiProbability.toFixed(2)}% AI probability`
+    : "Not analyzed";
+};
+
+const isImageSubmission = (submission: ClassSubmission) =>
+  submission.submissionType === "image" ||
+  submission.fileType?.toLowerCase().startsWith("image/") === true;
+
+const getVerdictToneClass = (submission: ClassSubmission) => {
+  const prediction =
+    typeof submission.analysisDetails?.finalPrediction === "string"
+      ? submission.analysisDetails.finalPrediction
+      : null;
+
+  if (prediction === "AI-generated") {
+    return "bg-[var(--heatmap-ai-bg)] text-[var(--heatmap-ai-text)]";
+  }
+  if (prediction === "Human") {
+    return "bg-[var(--heatmap-human-bg)] text-[var(--heatmap-human-text)]";
+  }
+  if (prediction === "Needs Review") {
+    return "bg-[var(--heatmap-suspicious-bg)] text-[var(--heatmap-suspicious-text)]";
+  }
+
+  if (typeof submission.aiProbability === "number") {
+    if (submission.aiProbability >= 70) {
+      return "bg-[var(--heatmap-ai-bg)] text-[var(--heatmap-ai-text)]";
+    }
+    if (submission.aiProbability >= 40) {
+      return "bg-[var(--heatmap-suspicious-bg)] text-[var(--heatmap-suspicious-text)]";
+    }
+    return "bg-[var(--heatmap-human-bg)] text-[var(--heatmap-human-text)]";
+  }
+
+  return "bg-[color-mix(in_srgb,var(--app-muted)_18%,transparent)] text-[var(--app-text)]";
 };
 
 export function TeacherClassManagerModal({
@@ -73,6 +129,7 @@ export function TeacherClassManagerModal({
   isAnalyzing,
   analyzingSubmissionId,
   expandedSubmissionId,
+  focusedActivityId,
   onClose,
   onAnalyzeAll,
   onAnalyzeSubmission,
@@ -84,8 +141,13 @@ export function TeacherClassManagerModal({
   onClearAttachment,
   onChangeActivityForm,
   onToggleSubmission,
-  getProbabilityTone,
 }: TeacherClassManagerModalProps) {
+  const imageSubmissions = submissions.filter(isImageSubmission);
+  const currentImageIndex =
+    analyzingSubmissionId && imageSubmissions.length > 0
+      ? imageSubmissions.findIndex((submission) => submission.id === analyzingSubmissionId)
+      : -1;
+
   return (
     <AnimatePresence>
       {open && classroom && (
@@ -290,6 +352,60 @@ export function TeacherClassManagerModal({
                     </CardContent>
                   </Card>
 
+                  <Card className="theme-card order-2">
+                    <CardContent className="space-y-3 p-5">
+                      <h4 className="text-lg font-semibold text-[var(--app-text)]">Activities</h4>
+
+                      {activities.length === 0 ? (
+                        <p className="text-sm theme-muted">No activities created yet.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {activities.map((activity) => {
+                            const focused = focusedActivityId === activity.id;
+
+                            return (
+                              <div
+                                key={activity.id}
+                                className={[
+                                  "rounded-xl border p-3 transition",
+                                  focused
+                                    ? "border-[color-mix(in_srgb,var(--app-accent)_55%,var(--app-border))] bg-[color-mix(in_srgb,var(--app-accent)_10%,var(--app-surface))]"
+                                    : "theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)]",
+                                ].join(" ")}
+                              >
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                  <div>
+                                    <p className="font-medium text-[var(--app-text)]">
+                                      {activity.title}
+                                    </p>
+                                    <p className="mt-1 text-xs theme-muted">
+                                      {activity.description}
+                                    </p>
+                                  </div>
+                                  <div className="flex shrink-0 items-center gap-2 text-xs theme-muted">
+                                    <CalendarClock className="h-4 w-4 text-[var(--app-accent)]" />
+                                    {new Date(activity.dueDate).toLocaleString()}
+                                  </div>
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-2 text-xs theme-muted">
+                                  <span className="rounded-full bg-[color-mix(in_srgb,var(--app-accent)_16%,transparent)] px-2 py-1 text-[var(--app-accent)]">
+                                    {getSubmissionTypeLabel(activity.submissionType)}
+                                  </span>
+                                  <span>{activity.submissionCount} submissions</span>
+                                  {focused && (
+                                    <span className="font-semibold text-[var(--app-accent)]">
+                                      Selected activity
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
                   <Card className="theme-card order-4">
                     <CardContent className="space-y-3 p-5">
                       <h4 className="text-lg font-semibold text-[var(--app-text)]">Enrolled Students</h4>
@@ -317,7 +433,7 @@ export function TeacherClassManagerModal({
                     </CardContent>
                   </Card>
 
-                  <Card className="theme-card order-2">
+                  <Card className="theme-card order-3">
                     <CardContent className="space-y-3 p-5">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <h4 className="text-lg font-semibold text-[var(--app-text)]">
@@ -327,10 +443,34 @@ export function TeacherClassManagerModal({
                           onClick={onAnalyzeAll}
                           disabled={isAnalyzing || submissions.length === 0}
                         >
-                          <WandSparkles className="mr-2 h-4 w-4" />
+                          {isAnalyzing ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <WandSparkles className="mr-2 h-4 w-4" />
+                          )}
                           {isAnalyzing ? "Analyzing..." : "Analyze All"}
                         </Button>
                       </div>
+
+                      {(isAnalyzing || analyzingSubmissionId) && (
+                        <div className="rounded-2xl border theme-border bg-[color-mix(in_srgb,var(--app-accent)_10%,var(--app-surface))] p-4">
+                          <div className="flex items-start gap-3">
+                            <Loader2 className="mt-0.5 h-5 w-5 animate-spin text-[var(--app-accent)]" />
+                            <div>
+                              <p className="font-semibold text-[var(--app-text)]">
+                                Checking content using the detection model...
+                              </p>
+                              <p className="mt-1 text-sm theme-muted">
+                                {currentImageIndex >= 0
+                                  ? `Analyzing image ${currentImageIndex + 1} of ${imageSubmissions.length}.`
+                                  : imageSubmissions.length > 1
+                                    ? `Analyzing ${imageSubmissions.length} image submissions with compact thumbnail results.`
+                                    : "Please wait while the selected submission analysis finishes."}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                       {submissions.length === 0 ? (
                         <p className="text-sm theme-muted">No submissions yet.</p>
@@ -344,8 +484,24 @@ export function TeacherClassManagerModal({
                                 key={submission.id}
                                 className="rounded-2xl border theme-border bg-[color-mix(in_srgb,var(--app-surface-strong)_95%,transparent)] p-4 space-y-3"
                               >
-                                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                                  <div>
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                  <div className="flex min-w-0 gap-3">
+                                    {isImageSubmission(submission) && (
+                                      <div className="h-20 w-24 shrink-0 overflow-hidden rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-bg)_72%,black)]">
+                                        {submission.fileDataUrl ? (
+                                          <img
+                                            src={submission.fileDataUrl}
+                                            alt={submission.fileName ?? submission.activityTitle}
+                                            className="h-full w-full object-cover"
+                                          />
+                                        ) : (
+                                          <div className="grid h-full w-full place-items-center text-[var(--app-muted)]">
+                                            <ImageIcon className="h-6 w-6" />
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                    <div className="min-w-0">
                                     <p className="font-semibold text-[var(--app-text)]">
                                       {submission.studentName}
                                     </p>
@@ -356,17 +512,23 @@ export function TeacherClassManagerModal({
                                     <p className="mt-1 text-xs theme-muted">
                                       {getSubmissionTypeLabel(submission.submissionType)} activity
                                     </p>
+                                    {submission.fileName && (
+                                      <p className="mt-1 truncate text-xs theme-muted">
+                                        {submission.fileName}
+                                      </p>
+                                    )}
+                                    </div>
                                   </div>
 
                                   <div className="text-right">
                                     <span
                                       className={[
-                                        "rounded-full px-2 py-1 text-xs",
-                                        getProbabilityTone(submission.aiProbability),
+                                        "inline-flex rounded-full px-2.5 py-1 text-xs font-bold",
+                                        getVerdictToneClass(submission),
                                       ].join(" ")}
                                     >
                                       {typeof submission.aiProbability === "number"
-                                        ? `${submission.aiProbability.toFixed(2)}% AI probability`
+                                        ? getDisplayPrediction(submission)
                                         : "Not analyzed"}
                                     </span>
                                     {typeof submission.confidenceScore === "number" && (
@@ -385,7 +547,11 @@ export function TeacherClassManagerModal({
                                     onClick={() => onAnalyzeSubmission(submission.id)}
                                     disabled={isAnalyzing || analyzingSubmissionId === submission.id}
                                   >
-                                    <WandSparkles className="mr-2 h-4 w-4" />
+                                    {analyzingSubmissionId === submission.id ? (
+                                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <WandSparkles className="mr-2 h-4 w-4" />
+                                    )}
                                     {analyzingSubmissionId === submission.id
                                       ? "Analyzing..."
                                       : "Analyze"}

@@ -15,6 +15,12 @@
   --app-shadow: 0 20px 45px rgba(37, 99, 235, 0.12);
   --app-glow: 0 0 32px rgba(37, 99, 235, 0.22);
   --sidebar-backdrop: rgba(15, 23, 42, 0.45);
+  --heatmap-human-bg: #dcfce7;
+  --heatmap-human-text: #14532d;
+  --heatmap-suspicious-bg: #ffedd5;
+  --heatmap-suspicious-text: #7c2d12;
+  --heatmap-ai-bg: #fee2e2;
+  --heatmap-ai-text: #7f1d1d;
 }
 
 :root.dark {
@@ -31,6 +37,12 @@
   --app-shadow: 0 24px 70px rgba(0, 0, 0, 0.46);
   --app-glow: 0 0 42px rgba(34, 211, 238, 0.24), 0 0 90px rgba(37, 99, 235, 0.14);
   --sidebar-backdrop: rgba(0, 3, 10, 0.78);
+  --heatmap-human-bg: rgba(34, 197, 94, 0.24);
+  --heatmap-human-text: #dcfce7;
+  --heatmap-suspicious-bg: rgba(249, 115, 22, 0.28);
+  --heatmap-suspicious-text: #ffedd5;
+  --heatmap-ai-bg: rgba(239, 68, 68, 0.3);
+  --heatmap-ai-text: #fee2e2;
 }
 
 html,
@@ -63,6 +75,26 @@ body {
   transition:
     background 220ms ease,
     color 220ms ease;
+}
+
+.role-theme-page {
+  background: radial-gradient(
+      circle at 18% -12%,
+      color-mix(in srgb, var(--app-accent) 24%, transparent),
+      transparent 42%
+    ),
+    radial-gradient(
+      circle at 86% 5%,
+      color-mix(in srgb, var(--app-accent-2) 18%, transparent),
+      transparent 40%
+    ),
+    linear-gradient(
+      135deg,
+      var(--app-bg) 0%,
+      var(--app-bg-soft) 46%,
+      color-mix(in srgb, var(--app-bg) 82%, #02050d) 100%
+    ),
+    var(--app-bg);
 }
 
 .theme-surface {
@@ -117,6 +149,34 @@ body {
   box-shadow: 0 0 0 4px var(--app-ring);
 }
 
+.heatmap-token {
+  border-radius: 0.45rem;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  color: var(--heatmap-human-text);
+  display: inline;
+  font-weight: 650;
+  padding: 0.1rem 0.3rem;
+}
+
+.heatmap-token-human {
+  background: var(--heatmap-human-bg);
+  color: var(--heatmap-human-text);
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--heatmap-human-text) 18%, transparent);
+}
+
+.heatmap-token-suspicious {
+  background: var(--heatmap-suspicious-bg);
+  color: var(--heatmap-suspicious-text);
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--heatmap-suspicious-text) 20%, transparent);
+}
+
+.heatmap-token-ai {
+  background: var(--heatmap-ai-bg);
+  color: var(--heatmap-ai-text);
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--heatmap-ai-text) 20%, transparent);
+}
+
 button,
 a,
 input,
@@ -164,4 +224,99 @@ select {
 
 .theme-loading-dot {
   animation: truesight-pulse 1.4s ease-in-out infinite;
+}
+
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton-shimmer::after {
+  animation: skeleton-shimmer 1.45s ease-in-out infinite;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--app-surface) 38%, transparent),
+    transparent
+  );
+  content: "";
+  inset: 0;
+  position: absolute;
+  transform: translateX(-100%);
+}
+
+@keyframes skeleton-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.auth-grid-effect {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--app-border) 16%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      0deg,
+      color-mix(in srgb, var(--app-border) 14%, transparent) 1px,
+      transparent 1px
+    ),
+    radial-gradient(
+      circle at 50% 18%,
+      color-mix(in srgb, var(--auth-accent) 12%, transparent),
+      transparent 34%
+    );
+  background-size: 44px 44px, 44px 44px, 100% 100%;
+  mask-image: linear-gradient(to bottom, transparent 0%, black 18%, black 78%, transparent 100%);
+  animation: auth-grid-drift 18s linear infinite;
+}
+
+.auth-sweep {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--auth-accent-2) 12%, transparent),
+    transparent
+  );
+  filter: blur(18px);
+}
+
+.auth-emblem {
+  position: relative;
+  overflow: hidden;
+}
+
+.auth-emblem::after {
+  content: "";
+  position: absolute;
+  inset: -45%;
+  background: conic-gradient(
+    from 90deg,
+    transparent,
+    color-mix(in srgb, var(--auth-accent-2) 26%, transparent),
+    transparent 35%
+  );
+  animation: auth-emblem-spin 8s linear infinite;
+}
+
+.auth-emblem > svg {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes auth-grid-drift {
+  from {
+    background-position: 0 0, 0 0, 0 0;
+  }
+  to {
+    background-position: 44px 44px, 44px 44px, 0 0;
+  }
+}
+
+@keyframes auth-emblem-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

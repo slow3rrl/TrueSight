@@ -13,9 +13,10 @@ export type AuthUser = {
 export type AuthContextType = {
   user: AuthUser | null;
   loading: boolean;
+  sessionReady: boolean;
   darkMode: boolean;
   toggleTheme: () => void;
-  signIn: (email: string, password: string) => Promise<void>;
+  signIn: (email: string, password: string, role: UserRole) => Promise<void>;
   signInWithGoogle: (credential: string, role: UserRole) => Promise<void>;
   signUp: (
     name: string,

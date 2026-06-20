@@ -1,6 +1,8 @@
 import express from "express";
+import type { CookieOptions, NextFunction, Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import type { JwtPayload } from "jsonwebtoken";
 import { OAuth2Client } from "google-auth-library";
 import pool from "../config/db.js";
 
@@ -10,15 +12,30 @@ const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 let authSchemaReady = false;
 const MAX_PROFILE_IMAGE_LENGTH = 2_000_000;
 
-const cookieOptions = {
+const cookieOptions: CookieOptions = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
   sameSite: "strict",
   maxAge: 30 * 24 * 60 * 60 * 1000,
 };
 
-const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, {
+const clearAuthCookie = (res: Response) => {
+  res.cookie("token", "", { ...cookieOptions, maxAge: 1 });
+};
+
+type UserRole = "student" | "teacher";
+
+const normalizeRole = (role: unknown): UserRole | null => {
+  if (role === "student" || role === "teacher") return role;
+  return null;
+};
+
+const rolePortalMessage = (role: UserRole) => {
+  return `This account is registered as a ${role}. Please log in using the ${role} portal.`;
+};
+
+const generateToken = (id: number | string, role: UserRole) => {
+  return jwt.sign({ id, role }, process.env.JWT_SECRET as string, {
     expiresIn: "30d",
   });
 };
@@ -40,6 +57,11 @@ const ensureAuthSchema = async () => {
   `);
 
   await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_unique
+    ON users (LOWER(email))
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS user_preferences (
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       notifications_enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -50,7 +72,7 @@ const ensureAuthSchema = async () => {
   authSchemaReady = true;
 };
 
-const ensureUserPreferences = async (userId, notificationsEnabled = true) => {
+const ensureUserPreferences = async (userId: number | string, notificationsEnabled = true) => {
   await pool.query(
     `INSERT INTO user_preferences (user_id, notifications_enabled)
      VALUES ($1, $2)
@@ -62,7 +84,7 @@ const ensureUserPreferences = async (userId, notificationsEnabled = true) => {
   );
 };
 
-const getUserProfileById = async (userId) => {
+const getUserProfileById = async (userId: number | string) => {
   const user = await pool.query(
     `SELECT u.id, u.name, u.email, u.role, u.created_at,
             COALESCE(u.profile_image_url, u.profile_picture) AS profile_image_url,
@@ -77,7 +99,7 @@ const getUserProfileById = async (userId) => {
   return user.rows[0] ?? null;
 };
 
-const protect = async (req, res, next) => {
+const protect = async (req: Request, res: Response, next: NextFunction) => {
   try {
     await ensureAuthSchema();
 
@@ -87,16 +109,25 @@ const protect = async (req, res, next) => {
       return res.status(401).json({ message: "Not authorized. No token found." });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as JwtPayload;
     const user = await getUserProfileById(decoded.id);
 
     if (!user) {
       return res.status(401).json({ message: "User not found." });
     }
 
+    if (
+      typeof decoded.role === "string" &&
+      decoded.role !== user.role
+    ) {
+      clearAuthCookie(res);
+      return res.status(401).json({ message: "Invalid or expired token." });
+    }
+
     req.user = user;
     next();
   } catch {
+    clearAuthCookie(res);
     return res.status(401).json({ message: "Invalid or expired token." });
   }
 };
@@ -110,20 +141,22 @@ router.post("/signup", async (req, res) => {
     const normalizedEmail = String(email ?? "")
       .trim()
       .toLowerCase();
-    const normalizedRole = role === "teacher" ? "teacher" : "student";
+    const normalizedRole = normalizeRole(role);
 
-    if (!normalizedName || !normalizedEmail || !password) {
+    if (!normalizedName || !normalizedEmail || !password || !normalizedRole) {
       return res
         .status(400)
         .json({ message: "Please provide all required fields." });
     }
 
-    const userExists = await pool.query("SELECT id FROM users WHERE LOWER(email) = $1", [
+    const userExists = await pool.query("SELECT id, role FROM users WHERE LOWER(email) = $1", [
       normalizedEmail,
     ]);
 
     if (userExists.rows.length > 0) {
-      return res.status(400).json({ message: "User already exists." });
+      const existingRole = normalizeRole(userExists.rows[0].role) ?? "student";
+      clearAuthCookie(res);
+      return res.status(409).json({ message: rolePortalMessage(existingRole) });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -137,9 +170,13 @@ router.post("/signup", async (req, res) => {
 
     await ensureUserPreferences(newUser.rows[0].id, true);
     const profile = await getUserProfileById(newUser.rows[0].id);
+    const token = generateToken(newUser.rows[0].id, normalizedRole);
+    res.cookie("token", token, cookieOptions);
 
     return res.status(201).json({
+      success: true,
       message: "User registered successfully.",
+      token,
       user: profile,
     });
   } catch (error) {
@@ -154,12 +191,13 @@ router.post("/login", async (req, res) => {
   try {
     await ensureAuthSchema();
 
-    const { email, password } = req.body;
+    const { email, password, role } = req.body;
     const normalizedEmail = String(email ?? "")
       .trim()
       .toLowerCase();
+    const selectedRole = normalizeRole(role);
 
-    if (!normalizedEmail || !password) {
+    if (!normalizedEmail || !password || !selectedRole) {
       return res
         .status(400)
         .json({ message: "Please provide all required fields." });
@@ -188,12 +226,21 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials." });
     }
 
+    const storedRole = normalizeRole(userData.role);
+
+    if (!storedRole || storedRole !== selectedRole) {
+      clearAuthCookie(res);
+      return res.status(403).json({
+        message: rolePortalMessage(storedRole ?? "student"),
+      });
+    }
+
     if (userData.notifications === null || userData.notifications === undefined) {
       await ensureUserPreferences(userData.id, true);
       userData.notifications = true;
     }
 
-    const token = generateToken(userData.id);
+    const token = generateToken(userData.id, storedRole);
     res.cookie("token", token, cookieOptions);
 
     return res.status(200).json({
@@ -232,9 +279,9 @@ router.post("/google", async (req, res) => {
     await ensureAuthSchema();
 
     const { credential, role } = req.body;
-    const normalizedRole = role === "teacher" ? "teacher" : "student";
+    const normalizedRole = normalizeRole(role);
 
-    if (!credential || typeof credential !== "string") {
+    if (!credential || typeof credential !== "string" || !normalizedRole) {
       return res.status(400).json({ message: "Missing Google credential." });
     }
 
@@ -283,7 +330,7 @@ router.post("/google", async (req, res) => {
     }
 
     const existing = await pool.query(
-      `SELECT id, google_id, profile_image_url, profile_picture
+      `SELECT id, google_id, role, profile_image_url, profile_picture
        FROM users
        WHERE google_id = $1 OR LOWER(email) = $2
        ORDER BY CASE WHEN google_id = $1 THEN 0 ELSE 1 END
@@ -296,6 +343,14 @@ router.post("/google", async (req, res) => {
     if (existing.rows.length > 0) {
       const user = existing.rows[0];
       userId = user.id;
+      const storedRole = normalizeRole(user.role);
+
+      if (!storedRole || storedRole !== normalizedRole) {
+        clearAuthCookie(res);
+        return res.status(403).json({
+          message: rolePortalMessage(storedRole ?? "student"),
+        });
+      }
 
       if (user.google_id && user.google_id !== googleId) {
         return res.status(409).json({
@@ -332,7 +387,16 @@ router.post("/google", async (req, res) => {
     await ensureUserPreferences(userId, true);
 
     const profile = await getUserProfileById(userId);
-    const token = generateToken(userId);
+    const storedRole = profile ? normalizeRole(profile.role) : null;
+
+    if (!profile || !storedRole) {
+      clearAuthCookie(res);
+      return res.status(500).json({
+        message: "Google login succeeded, but the account profile could not be loaded.",
+      });
+    }
+
+    const token = generateToken(userId, storedRole);
     res.cookie("token", token, cookieOptions);
 
     return res.status(200).json({
@@ -445,7 +509,7 @@ router.patch("/me", protect, async (req, res) => {
 router.delete("/me", protect, async (req, res) => {
   try {
     await pool.query("DELETE FROM users WHERE id = $1", [req.user.id]);
-    res.cookie("token", "", { ...cookieOptions, maxAge: 1 });
+    clearAuthCookie(res);
 
     return res.status(200).json({
       message: "Account deleted successfully.",
@@ -459,7 +523,7 @@ router.delete("/me", protect, async (req, res) => {
 });
 
 router.post("/logout", (req, res) => {
-  res.cookie("token", "", { ...cookieOptions, maxAge: 1 });
+  clearAuthCookie(res);
 
   return res.json({ message: "Logged out successfully." });
 });

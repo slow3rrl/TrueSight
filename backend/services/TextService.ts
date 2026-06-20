@@ -52,6 +52,9 @@ type SaplingPayload = {
   msg?: unknown;
 };
 
+const TOKEN_TEXT_KEYS = ["token", "text", "word", "value"] as const;
+const TOKEN_SCORE_KEYS = ["aiProbability", "probability", "score", "ai_score", "token_prob"] as const;
+
 const TRANSITION_PATTERN =
   /\b(however|therefore|moreover|furthermore|additionally|meanwhile|consequently|nonetheless|instead|for example|for instance|in contrast|as a result|in conclusion|on the other hand)\b/i;
 
@@ -305,17 +308,34 @@ const buildProviderSuspiciousSentences = (
 };
 
 const buildHighlightedTokens = (payload: SaplingPayload): HighlightedToken[] => {
-  if (!Array.isArray(payload.tokens) || !Array.isArray(payload.token_probs)) {
+  if (!Array.isArray(payload.tokens)) {
     return [];
   }
 
   return payload.tokens
     .map((token, index) => {
-      const aiProbability = normalizeProbability(payload.token_probs?.[index]);
-      if (typeof token !== "string" || aiProbability === null) return null;
+      const tokenText =
+        typeof token === "string"
+          ? token
+          : typeof token === "object" && token !== null
+            ? TOKEN_TEXT_KEYS.map((key) => (token as Record<string, unknown>)[key]).find(
+                (value): value is string => typeof value === "string",
+              )
+            : null;
+      const tokenScore =
+        Array.isArray(payload.token_probs) && payload.token_probs[index] !== undefined
+          ? payload.token_probs[index]
+          : typeof token === "object" && token !== null
+            ? TOKEN_SCORE_KEYS.map((key) => (token as Record<string, unknown>)[key]).find(
+                (value) => asNumber(value) !== null,
+              )
+            : null;
+      const aiProbability = normalizeProbability(tokenScore);
+
+      if (!tokenText || aiProbability === null) return null;
 
       return {
-        token,
+        token: tokenText,
         aiProbability,
       };
     })

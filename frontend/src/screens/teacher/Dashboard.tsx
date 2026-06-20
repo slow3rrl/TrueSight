@@ -60,7 +60,7 @@ export const Dashboard = () => {
         </div>
         <button
           onClick={() => setIsModalOpen(true)}
-          className="mt-4 sm:mt-0 flex items-center space-x-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-all shadow-md hover:shadow-lg"
+          className="mt-4 sm:mt-0 flex items-center space-x-2 px-5 py-2.5 bg-[var(--app-accent)] hover:bg-[color-mix(in_srgb,var(--app-accent)_88%,black)] text-white rounded-lg font-medium transition-all shadow-md hover:shadow-lg"
         >
           <Plus className="w-5 h-5" />
           <span>{isTeacher ? 'Create Class' : 'Join Class'}</span>
@@ -75,9 +75,9 @@ export const Dashboard = () => {
             className="group relative bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden cursor-pointer flex flex-col"
             onClick={() => navigate(`/class/${cls.id}`)}
           >
-            <div className="h-32 bg-gradient-to-r from-blue-500 to-indigo-600 px-6 py-5 flex flex-col justify-end">
+            <div className="h-32 bg-gradient-to-r from-[var(--app-accent)] to-[var(--app-accent-2)] px-6 py-5 flex flex-col justify-end">
               <h3 className="text-xl font-bold text-white mb-1 truncate">{cls.name}</h3>
-              <p className="text-blue-100 text-sm opacity-90 truncate">{cls.description}</p>
+              <p className="text-white/80 text-sm opacity-90 truncate">{cls.description}</p>
             </div>
             <div className="p-6 flex-1 flex flex-col justify-between">
               <div className="flex items-center justify-between text-sm text-slate-500 dark:text-slate-400 mb-4">
@@ -97,7 +97,7 @@ export const Dashboard = () => {
                   </div>
                 )}
               </div>
-              <div className="flex items-center text-blue-600 dark:text-blue-400 font-medium group-hover:underline mt-auto">
+              <div className="flex items-center text-[var(--app-accent)] font-medium group-hover:underline mt-auto">
                 <span className="text-sm">View Details</span>
                 <ArrowRight className="w-4 h-4 ml-1 opacity-0 group-hover:opacity-100 transform -translate-x-2 group-hover:translate-x-0 transition-all" />
               </div>
@@ -143,7 +143,7 @@ export const Dashboard = () => {
                       type="text"
                       value={className}
                       onChange={(e) => setClassName(e.target.value)}
-                      className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-slate-700 dark:text-white"
+                      className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-[var(--app-ring)] dark:bg-slate-700 dark:text-white"
                       placeholder="e.g. Introduction to Biology"
                     />
                   </div>
@@ -153,7 +153,7 @@ export const Dashboard = () => {
                       required
                       value={classDesc}
                       onChange={(e) => setClassDesc(e.target.value)}
-                      className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-slate-700 dark:text-white"
+                      className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-[var(--app-ring)] dark:bg-slate-700 dark:text-white"
                       placeholder="Brief overview of the class..."
                       rows={3}
                     />
@@ -167,7 +167,7 @@ export const Dashboard = () => {
                     type="text"
                     value={joinCode}
                     onChange={(e) => setJoinCode(e.target.value)}
-                    className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-slate-700 dark:text-white uppercase font-mono"
+                    className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-[var(--app-ring)] dark:bg-slate-700 dark:text-white uppercase font-mono"
                     placeholder="e.g. A1B2C3"
                   />
                   <p className="mt-2 text-xs text-slate-500">Ask your teacher for the class code, then enter it here.</p>
@@ -183,7 +183,7 @@ export const Dashboard = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition"
+                  className="px-4 py-2 bg-[var(--app-accent)] hover:bg-[color-mix(in_srgb,var(--app-accent)_88%,black)] text-white rounded-lg font-medium transition"
                 >
                   {isTeacher ? 'Create' : 'Join'}
                 </button>

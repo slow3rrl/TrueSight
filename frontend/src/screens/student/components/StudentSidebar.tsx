@@ -2,6 +2,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
 import { LogOut, X } from "lucide-react";
+import { AppLogo } from "../../../components/AppLogo";
 import { LogoutConfirmationDialog } from "../../../components/LogoutConfirmationDialog";
 import type { EnrolledClass } from "../services/studentClassroomService";
 
@@ -149,7 +150,8 @@ export function StudentSidebar({
           hovered ? "w-72" : "w-20",
         ].join(" ")}
       >
-        <div className="flex h-11 items-center px-2">
+        <div className="flex h-11 items-center gap-3 px-2">
+          <AppLogo variant="icon" iconClassName="h-11 w-11 rounded-2xl" />
           <span
             className={[
               "theme-title overflow-hidden whitespace-nowrap text-lg font-bold transition-all duration-200",
@@ -209,7 +211,7 @@ export function StudentSidebar({
               className="theme-surface fixed left-0 top-0 z-50 h-screen w-72 px-4 py-4 md:hidden"
             >
               <div className="flex items-center justify-between">
-                <p className="theme-title text-lg font-bold">Student Hub</p>
+                <AppLogo iconClassName="h-11 w-11 rounded-2xl" />
                 <button
                   onClick={onCloseMobile}
                   className="theme-ring inline-flex h-9 w-9 items-center justify-center rounded-lg text-[var(--app-muted)] hover:bg-[color-mix(in_srgb,var(--app-accent)_10%,transparent)]"

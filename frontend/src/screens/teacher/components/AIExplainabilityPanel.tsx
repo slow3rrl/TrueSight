@@ -91,14 +91,14 @@ const parseSignals = (value: unknown): ExplainabilitySignal[] => {
 
 const getTone = (score: number): string => {
   if (score >= 75) {
-    return "bg-rose-500 text-rose-300";
+    return "bg-[var(--heatmap-ai-bg)] text-[var(--heatmap-ai-text)]";
   }
 
   if (score >= 50) {
-    return "bg-amber-500 text-amber-300";
+    return "bg-[var(--heatmap-suspicious-bg)] text-[var(--heatmap-suspicious-text)]";
   }
 
-  return "bg-emerald-500 text-emerald-300";
+  return "bg-[var(--heatmap-human-bg)] text-[var(--heatmap-human-text)]";
 };
 
 const getBarTone = (score: number): string => {

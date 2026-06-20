@@ -1,487 +1,217 @@
 # TrueSight
-# AI-Powered Academic Integrity Management System
 
-## Overview
+AI-powered academic integrity management system for classroom submissions. The app lets students submit text, documents, and images, while teachers review AI-detection results, class activity, and submission history.
 
-The **AI-Powered Academic Integrity Management System** is a full-stack web application designed to help educational institutions monitor, analyze, and manage academic submissions using modern artificial intelligence technologies.
+## Stack
 
-The platform provides a centralized environment where students can submit assignments, essays, research documents, and images while allowing instructors and administrators to evaluate the authenticity and originality of submitted work.
+- Frontend: React, TypeScript, Vite
+- Backend: Node.js, Express, PostgreSQL
+- Text detection: GPTZero-compatible API integration
+- Image detection: local EfficientNetV2 Keras model through Python/TensorFlow
 
-The system integrates:
-- AI-generated text detection
-- AI-generated image detection
-- Role-based access management
-- Submission tracking and analysis
-- Secure file uploads
-- Instructor review workflows
-- Administrative monitoring tools
-- Real-time analysis reporting
+## Active Image Model
 
-This project aims to strengthen academic integrity by leveraging artificial intelligence to identify potentially AI-generated content while maintaining an efficient submission and review process for educational institutions.
+The production image classifier is:
 
----
+- Model: `models/efficientnetv2_ai_human.keras`
+- Labels: `models/labels.json`
+- Classes: `Human` and `AI-generated`
+- Input: RGB image resized to `224x224`
+- Output: binary sigmoid probability
+- Review label: `Needs Review` when the score is close to the configured threshold
 
-# Key Features
+`models/labels.json` must contain:
 
-## Authentication & Security
+```json
+{
+  "0": "Human",
+  "1": "AI-generated"
+}
+```
 
-### Secure User Authentication
-- JWT-based authentication system
-- Password hashing and protection
-- Protected API routes
-- Secure session management
-- Role-based authorization
+The `.keras` file is large and is intentionally ignored by Git. Place it manually at `models/efficientnetv2_ai_human.keras` before running image prediction. Keep `models/labels.json` in the same folder.
 
-### Role-Based Access Control
-
-The platform supports multiple user roles:
-
-#### Student
-- Submit assignments and essays
-- Upload files and images
-- View submission history
-- Track analysis status
-- Receive instructor feedback
-
-#### Teacher / Instructor
-- Create and manage classes
-- Review student submissions
-- Analyze files for AI-generated content
-- View AI probability reports
-- Monitor academic integrity violations
-- Manage course submissions
-
-#### Administrator
-- Manage system-wide users
-- Monitor analytics and reports
-- Oversee institutional integrity metrics
-- Control platform access and permissions
-- Manage academic records
-
----
-
-# AI-Powered Detection System
-
-## AI-Generated Text Detection
-
-The system integrates AI detection APIs to analyze:
-- Essays
-- Research papers
-- Assignment submissions
-- Uploaded text documents
-- Written responses
-
-### Supported File Types
-- TXT
-- PDF
-- DOCX
-- Essay text inputs
-
-### Detection Workflow
-1. Student uploads or submits text
-2. System extracts textual content
-3. Text is processed through AI detection APIs
-4. AI probability score is generated
-5. Results are stored in the database
-6. Teachers can review detailed reports
-
-### Analysis Output
-- AI probability percentage
-- Human-written probability
-- Detection confidence score
-- Submission analysis details
-- Integrity assessment reports
-
----
-
-## AI-Generated Image Detection
-
-The platform supports machine learning-based image authenticity detection.
-
-### Supported Image Formats
-- PNG
-- JPG
-- JPEG
-- WEBP
-
-### Image Detection Features
-- AI-generated image classification
-- Deep learning image analysis
-- Machine learning inference engine
-- Automated authenticity scoring
-- Probability-based image evaluation
-
-### Planned Integration
-The project utilizes:
-- TensorFlow.js
-- Teachable Machine-trained models
-- Backend inference processing
-- Real-time image analysis
-
----
-
-# Submission Management System
-
-## Assignment Submission Workflow
-
-### Student Features
-- Upload assignments
-- Submit essays
-- Attach files and images
-- View submission status
-- Track deadlines
-
-### Instructor Features
-- Access student submissions
-- Review uploaded content
-- Trigger AI analysis
-- View analysis results
-- Provide evaluation feedback
-
-### Submission Tracking
-
-The system records:
-- Submission timestamps
-- File metadata
-- AI analysis results
-- Submission status
-- Reviewer comments
-- Integrity reports
-
----
-
-# Class Management System
-
-## Teacher Capabilities
-
-### Class Creation
-- Create academic classes
-- Manage enrolled students
-- Organize assignments
-- Track submission activity
-
-### Assignment Management
-- Publish assignments
-- Set deadlines
-- Monitor student submissions
-- Review integrity reports
-
-### Student Monitoring
-- Analyze submission patterns
-- Detect suspicious content
-- Maintain academic compliance
-- Generate class reports
-
----
-
-# Dashboard & Analytics
-
-## Administrative Dashboard
-
-The system includes a centralized dashboard for monitoring:
-- User activity
-- Submission metrics
-- AI detection statistics
-- Integrity violation trends
-- Class performance summaries
-
-## Data Visualization
-- Submission analytics
-- AI probability charts
-- Integrity monitoring reports
-- User activity insights
-
----
-
-# System Architecture
-
-## Frontend
-
-The frontend is built using modern web technologies to provide a responsive and user-friendly interface.
-
-### Technologies
-- React.js
-- TypeScript
-- Vite
-- React Router
-- Axios
-- Modern CSS styling
-
-### Frontend Features
-- Responsive design
-- Dynamic routing
-- Real-time API communication
-- Secure authentication flow
-- User-friendly dashboards
-
----
-
-## Backend
-
-The backend provides API services, authentication, AI processing integration, and database management.
-
-### Technologies
-- Node.js
-- Express.js
-- JWT Authentication
-- Multer
-- REST APIs
-
-### Backend Features
-- RESTful API architecture
-- Secure route protection
-- AI analysis processing
-- File handling and storage
-- Database integration
-- Submission management
-
----
-
-## Database
-
-### Database System
-- PostgreSQL
-
-### Database Responsibilities
-- User management
-- Submission records
-- AI analysis results
-- Role management
-- Academic records
-- File metadata storage
-
----
-
-# AI Integration Workflow
-
-## Text Detection Pipeline
+## Project Structure
 
 ```text
-Student Submission
-        ↓
-File/Text Extraction
-        ↓
-AI Text Detection API
-        ↓
-Probability Scoring
-        ↓
-Database Storage
-        ↓
-Instructor Review Dashboard
+project-root/
+├── backend/
+│   ├── config/
+│   ├── routes/
+│   ├── services/
+│   │   ├── ImageService.ts
+│   │   └── efficientnetv2_predict.py
+│   ├── requirements.txt
+│   ├── package.json
+│   └── server.js
+├── frontend/
+│   ├── public/
+│   └── src/
+├── models/
+│   ├── efficientnetv2_ai_human.keras
+│   └── labels.json
+├── docs/
+│   └── project-structure.md
+├── .gitignore
+└── README.md
 ```
 
----
+The current backend layout is intentionally kept simple instead of forcing a larger `backend/app` migration.
 
-## Image Detection Pipeline
+## Environment Variables
 
-```text
-Image Upload
-      ↓
-Image Preprocessing
-      ↓
-TensorFlow.js Model Inference
-      ↓
-AI Probability Analysis
-      ↓
-Result Storage
-      ↓
-Teacher Review Interface
-```
-
----
-
-# Core Functionalities
-
-## User Management
-- Registration system
-- Login authentication
-- Role assignment
-- Profile management
-
-## File Management
-- Secure file uploads
-- Multi-format support
-- File validation
-- Submission tracking
-
-## AI Analysis
-- Automated text analysis
-- Image authenticity detection
-- AI probability reporting
-- Integrity monitoring
-
-## Academic Monitoring
-- Submission history
-- Integrity reports
-- Instructor reviews
-- Analytics dashboard
-
----
-
-# Technologies Used
-
-## Frontend
-- React.js
-- TypeScript
-- Vite
-- HTML5
-- CSS3
-- Axios
-
-## Backend
-- Node.js
-- Express.js
-- JWT
-- Multer
-- REST APIs
-
-## Database
-- PostgreSQL
-
-## AI & Machine Learning
-- GPTZero API
-- TensorFlow.js
-- Google Teachable Machine
-
-## Additional Tools
-- Git
-- GitHub
-- VS Code
-- Postman
-
----
-
-# Installation Guide
-
-## Clone Repository
-
-```bash
-git clone <repository-url>
-```
-
----
-
-## Backend Setup
-
-```bash
-cd backend
-npm install
-```
-
-### Configure Environment Variables
-
-Create a `.env` file inside the backend folder:
+Create `backend/.env`:
 
 ```env
 PORT=5000
-DATABASE_URL=your_database_url
-JWT_SECRET=your_secret_key
-GPTZERO_API_KEY=your_api_key
+CLIENT_URL=http://localhost:5173
+DATABASE_URL=postgres://user:password@localhost:5432/database_name
+JWT_SECRET=replace_me
+GPTZERO_API_KEY=replace_me
 GPTZERO_API_URL=https://api.gptzero.me/v2/predict/text
+
+# Optional when the default python executable is not the TensorFlow environment.
+PYTHON_EXECUTABLE=C:\Path\To\Python\python.exe
+
+# Optional absolute-path overrides. Leave unset to use the top-level models/ folder.
+# IMAGE_MODEL_PATH=C:\Path\To\efficientnetv2_ai_human.keras
+# IMAGE_LABELS_PATH=C:\Path\To\labels.json
+
+# Image model preprocessing and thresholds.
+IMAGE_MODEL_INPUT_SCALE=0_1
+IMAGE_AI_THRESHOLD=0.50
+IMAGE_HUMAN_CONFIDENT_MAX=0.40
+IMAGE_AI_CONFIDENT_MIN=0.60
+IMAGE_PREDICTOR_TIMEOUT_MS=120000
 ```
 
-### Start Backend Server
+## Backend Setup
 
-```bash
+```powershell
+cd backend
+npm install
+pip install -r requirements.txt
 npm run dev
 ```
 
----
+The backend starts on `http://localhost:5000` by default.
+
+Python dependencies are listed in `backend/requirements.txt`:
+
+- `tensorflow`
+- `numpy`
+- `pillow`
+
+Use a Python version supported by your installed TensorFlow package. If you use a virtual environment, set `PYTHON_EXECUTABLE` to that environment's Python executable.
 
 ## Frontend Setup
 
-```bash
+```powershell
 cd frontend
 npm install
 npm run dev
 ```
 
----
+The frontend starts on `http://localhost:5173` by default.
 
-# Project Structure
+## Image Prediction Flow
+
+Prediction is handled by:
+
+- Backend orchestration: `backend/services/ImageService.ts`
+- Python inference script: `backend/services/efficientnetv2_predict.py`
+- Model assets: `models/efficientnetv2_ai_human.keras` and `models/labels.json`
+
+The backend starts a reusable Python EfficientNetV2 worker so TensorFlow and the
+Keras model are loaded once and reused across image analyses. The Python
+predictor:
+
+1. Loads `models/efficientnetv2_ai_human.keras`.
+2. Loads `models/labels.json`.
+3. Warms up the model once during backend startup.
+4. Decodes the uploaded image and handles EXIF orientation.
+5. Converts it to RGB.
+5. Resizes it to `224x224`.
+6. Converts it to a NumPy array and adds the batch dimension.
+7. Uses `IMAGE_MODEL_INPUT_SCALE=0_1` for the current saved model, which returns finite predictions with `0_1` inputs. Use `raw` only if the model was trained/exported with built-in EfficientNetV2 preprocessing.
+8. Runs Keras prediction and applies configurable threshold/review-band handling.
+9. Returns `Human`, `AI-generated`, or `Needs Review` with confidence, AI probability, Human probability, threshold, message, and timing data.
+
+Default image thresholds:
+
+- `AI probability <= 40%`: `Human`
+- `40% < AI probability < 60%`: `Needs Review`
+- `AI probability >= 60%`: `AI-generated`
+
+## Testing Image Prediction
+
+1. Confirm the model files exist:
+
+   ```powershell
+   Test-Path models\efficientnetv2_ai_human.keras
+   Get-Content models\labels.json
+   ```
+
+2. Confirm Python can import TensorFlow:
+
+   ```powershell
+   python -c "import tensorflow as tf; print(tf.__version__)"
+   ```
+
+3. Start the backend and frontend.
+
+4. Submit an image through the app. The result can be:
+
+   - `Human`
+   - `AI-generated`
+   - `Needs Review`
+
+If prediction fails, the backend returns a fallback result with an error message in the image analysis details.
+
+For capstone demo testing, place known images under:
 
 ```text
-project-root/
-│
-├── backend/
-│   ├── routes/
-│   ├── middleware/
-│   ├── services/
-│   ├── uploads/
-│   ├── models/
-│   └── server.js
-│
-├── frontend/
-│   ├── src/
-│   ├── components/
-│   ├── pages/
-│   ├── services/
-│   └── App.tsx
-│
-└── README.md
+demo_samples/human/
+demo_samples/ai_generated/
+demo_samples/mixed/
 ```
 
----
+Then run:
 
-# Future Enhancements
+```powershell
+python scripts/test_image_model.py
+```
 
-## Planned Features
-- Real-time AI analysis
-- Advanced plagiarism detection
-- OCR text extraction
-- Multi-language support
-- Mobile application support
-- Notification system
-- Cloud deployment
-- Performance optimization
-- Advanced reporting tools
-- Faculty-wide analytics
+To compare thresholds:
 
----
+```powershell
+python scripts/test_image_model.py --thresholds 0.40,0.45,0.50,0.55,0.60
+```
 
-# Security Features
+See `docs/image-model-demo-guide.md` for threshold calibration guidance.
 
-- Encrypted authentication
-- Protected API endpoints
-- Secure file uploads
-- Role-based access restriction
-- Input validation
-- Error handling
-- Secure database interactions
+## Useful Checks
 
----
+Backend TypeScript:
 
-# Capstone Project Significance
+```powershell
+cd backend
+.\node_modules\.bin\tsc.cmd --noEmit
+```
 
-This project addresses the growing concern regarding the misuse of generative AI tools in academic environments.
+Frontend build:
 
-By combining artificial intelligence detection systems with modern educational management tools, the platform provides institutions with a scalable and practical solution for maintaining academic honesty and improving submission monitoring processes.
+```powershell
+cd frontend
+npm run build
+```
 
-The system demonstrates the practical application of:
-- Artificial Intelligence
-- Machine Learning
-- Full-Stack Web Development
-- Database Systems
-- API Integration
-- Academic Technology Solutions
+Python syntax:
 
----
+```powershell
+python -m py_compile backend\services\efficientnetv2_predict.py
+```
 
-# Developers
+## Cleanup Notes
 
-### Capstone Project Team
-AI-Powered Academic Integrity Management System Developers
-
----
-
-# License
-
-This project is developed for educational and academic purposes.
-
----
-
-# Conclusion
-
-The AI-Powered Academic Integrity Management System represents a modern approach to maintaining educational honesty through intelligent automation and machine learning technologies.
-
-By integrating AI-generated content detection with a secure academic workflow system, the platform empowers educational institutions to adapt to emerging technological challenges while promoting fairness, originality, and accountability in academic submissions.
+Legacy image model artifacts are not used. The active image model path is the top-level `models/` folder. Build output, logs, temporary uploads, Python caches, local virtual environments, and large model binaries are ignored by Git.

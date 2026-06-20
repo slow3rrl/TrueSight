@@ -25,7 +25,7 @@ export function CreateClassPage() {
     const newCode = generateUniqueClassCode(existingCodes)
     setGeneratedCode(newCode)
 
-    // In a real app, this would save to the backend
+    // In production, this would save to the backend.
     toast.success("Class created successfully!")
   }
 
@@ -101,7 +101,7 @@ export function CreateClassPage() {
                       placeholder="Brief description of the class..."
                       value={description}
                       onChange={(e) => setDescription(e.target.value)}
-                      className="w-full px-3 py-2 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none h-24"
+                      className="w-full px-3 py-2 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[var(--app-ring)] resize-none h-24"
                       required
                     />
                   </motion.div>
@@ -113,7 +113,7 @@ export function CreateClassPage() {
                   transition={{ duration: 0.3, delay: 0.4 }}
                   className="mt-auto pt-8"
                 >
-                  <Button type="submit" className="w-full h-14 rounded-xl text-base shadow-md shadow-blue-600/20 bg-blue-600 dark:bg-blue-700 hover:bg-blue-700 dark:hover:bg-blue-600">
+                  <Button type="submit" className="w-full h-14 rounded-xl text-base shadow-md shadow-[var(--app-ring)] bg-[var(--app-accent)] dark:bg-[var(--app-accent)] hover:bg-[color-mix(in_srgb,var(--app-accent)_88%,black)] dark:hover:bg-[var(--app-accent)]">
                     <Sparkles className="w-5 h-5 mr-2" />
                     Generate Class Code
                   </Button>
@@ -147,16 +147,16 @@ export function CreateClassPage() {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3, delay: 0.2 }}
-                  className="bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900 rounded-2xl p-6 w-full mb-8 relative group"
+                  className="bg-[color-mix(in_srgb,var(--app-accent)_10%,var(--app-surface))] border theme-border rounded-2xl p-6 w-full mb-8 relative group"
                 >
-                  <p className="text-sm font-medium text-blue-600 dark:text-blue-400 mb-2">Class Code</p>
+                  <p className="text-sm font-medium text-[var(--app-accent)] mb-2">Class Code</p>
                   <div className="flex items-center justify-center gap-3">
-                    <span className="text-3xl font-mono font-bold tracking-widest text-blue-900 dark:text-blue-300">
+                    <span className="text-3xl font-mono font-bold tracking-widest text-[var(--app-text)] dark:text-[var(--app-accent)]">
                       {generatedCode}
                     </span>
                     <button
                       onClick={handleCopyCode}
-                      className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-lg transition-colors absolute right-4 top-1/2 -translate-y-1/2"
+                      className="p-2 text-[var(--app-accent)] hover:bg-[color-mix(in_srgb,var(--app-accent)_12%,transparent)] rounded-lg transition-colors absolute right-4 top-1/2 -translate-y-1/2"
                     >
                       {copied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
                     </button>
@@ -165,7 +165,7 @@ export function CreateClassPage() {
 
                 <div className="w-full space-y-3 mt-auto">
                   <Button
-                    className="w-full h-14 rounded-xl text-base shadow-md shadow-blue-600/20 bg-blue-600 dark:bg-blue-700 hover:bg-blue-700 dark:hover:bg-blue-600"
+                    className="w-full h-14 rounded-xl text-base shadow-md shadow-[var(--app-ring)] bg-[var(--app-accent)] dark:bg-[var(--app-accent)] hover:bg-[color-mix(in_srgb,var(--app-accent)_88%,black)] dark:hover:bg-[var(--app-accent)]"
                     onClick={() => navigate("/teacher")}
                   >
                     Go to Dashboard

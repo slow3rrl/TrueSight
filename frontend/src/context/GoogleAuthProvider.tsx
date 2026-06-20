@@ -7,11 +7,12 @@ import {
   type ReactNode,
 } from "react";
 import { GoogleOAuthProvider } from "@react-oauth/google";
-
-const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL ??
-  (import.meta.env.DEV ? "http://localhost:5000/api" : "/api")
-).replace(/\/$/, "");
+import { API_BASE_URL } from "../config/api";
+import {
+  isLikelyConnectivityError,
+  markBackendReachable,
+  markBackendUnreachable,
+} from "../services/connectivity";
 
 type GoogleAuthConfig = {
   configured: boolean;
@@ -65,6 +66,7 @@ export function RuntimeGoogleOAuthProvider({ children }: { children: ReactNode }
           throw new Error("Google auth config endpoint is unavailable.");
         }
 
+        markBackendReachable();
         const payload = (await response.json().catch(() => ({}))) as Record<
           string,
           unknown
@@ -81,7 +83,11 @@ export function RuntimeGoogleOAuthProvider({ children }: { children: ReactNode }
             "Google Client ID is missing. Add GOOGLE_CLIENT_ID to backend/.env or VITE_GOOGLE_CLIENT_ID to frontend/.env.",
           );
         }
-      } catch {
+      } catch (error) {
+        if (isLikelyConnectivityError(error)) {
+          markBackendUnreachable();
+        }
+
         if (active) {
           setRuntimeClientId("");
           setStatus("backend-unreachable");

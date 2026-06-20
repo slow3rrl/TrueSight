@@ -17,9 +17,12 @@ import { Card, CardContent } from "../../components/ui/Card";
 import { GlobalThemeToggle } from "../../components/theme/GlobalThemeToggle";
 import { ActivityNotificationsPopover } from "../../components/ActivityNotificationsPopover";
 import { useAuth } from "../../context/useAuth";
+import { getRoleThemeStyle } from "../../theme/roleThemes";
 import {
+  deleteNotification,
   fetchTeacherAnalytics,
   fetchUserNotifications,
+  markNotificationRead,
   type ActivityNotification,
   type TeacherAnalytics,
 } from "./services/teacherClassroomService";
@@ -27,6 +30,7 @@ import {
   TeacherSidebar,
   type TeacherSection,
 } from "./components/TeacherSidebar";
+import { navigateBack } from "../../utils/navigation";
 
 const SIDEBAR_ITEMS = [
   { key: "home", label: "Home", icon: Home },
@@ -39,7 +43,7 @@ const REFRESH_INTERVAL_MS = 30_000;
 
 export default function IntegrityAnalyticsPage() {
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, darkMode } = useAuth();
 
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [analytics, setAnalytics] = useState<TeacherAnalytics | null>(null);
@@ -77,6 +81,45 @@ export default function IntegrityAnalyticsPage() {
       setNotifications([]);
     } finally {
       setIsLoadingNotifications(false);
+    }
+  };
+
+  const handleMarkNotificationRead = async (notificationId: string) => {
+    setNotifications((current) =>
+      current.map((notification) =>
+        notification.id === notificationId
+          ? {
+              ...notification,
+              status: "read",
+              readAt: notification.readAt ?? new Date().toISOString(),
+            }
+          : notification,
+      ),
+    );
+
+    try {
+      await markNotificationRead(notificationId);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to update notification.";
+      toast.error(message);
+      await loadNotifications();
+    }
+  };
+
+  const handleDeleteNotification = async (notificationId: string) => {
+    const previous = notifications;
+    setNotifications((current) =>
+      current.filter((notification) => notification.id !== notificationId),
+    );
+
+    try {
+      await deleteNotification(notificationId);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to delete notification.";
+      toast.error(message);
+      setNotifications(previous);
     }
   };
 
@@ -132,7 +175,10 @@ export default function IntegrityAnalyticsPage() {
     : "Not synced yet";
 
   return (
-    <div className="h-screen overflow-hidden bg-transparent text-[var(--app-text)]">
+    <div
+      className="role-theme-page h-screen overflow-hidden text-[var(--app-text)]"
+      style={getRoleThemeStyle("teacher", darkMode)}
+    >
       <TeacherSidebar
         items={[...SIDEBAR_ITEMS]}
         activeSection={"home" as TeacherSection}
@@ -168,6 +214,12 @@ export default function IntegrityAnalyticsPage() {
               onToggle={() => setNotificationsOpen((current) => !current)}
               onClose={() => setNotificationsOpen(false)}
               onRefresh={() => void loadNotifications()}
+              onMarkRead={(notificationId) =>
+                void handleMarkNotificationRead(notificationId)
+              }
+              onDelete={(notificationId) =>
+                void handleDeleteNotification(notificationId)
+              }
             />
           </div>
         </div>
@@ -181,7 +233,7 @@ export default function IntegrityAnalyticsPage() {
         <div className="flex flex-wrap items-center gap-3">
           <Button
             variant="outline"
-            onClick={() => navigate("/teacher/teacher_screen/home")}
+            onClick={() => navigateBack(navigate, "/teacher/teacher_screen/home")}
           >
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Home
@@ -242,7 +294,7 @@ export default function IntegrityAnalyticsPage() {
             <Card className="theme-card">
               <CardContent className="space-y-3 p-5">
                 <h3 className="text-lg font-semibold text-[var(--app-text)]">
-                  Real-time monthly integrity trends
+                  Live monthly integrity trends
                 </h3>
                 {trendChartData.length === 0 ? (
                   <p className="text-sm theme-muted">No monthly trend data to visualize yet.</p>

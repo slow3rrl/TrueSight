@@ -25,7 +25,7 @@ export const ClassDetail = () => {
     return (
       <div className="text-center py-20">
         <h2 className="text-2xl font-bold text-slate-700 dark:text-slate-300">Class not found</h2>
-        <button onClick={() => navigate('/')} className="mt-4 text-blue-600 hover:underline">
+        <button onClick={() => navigate('/')} className="mt-4 text-[var(--app-accent)] hover:underline">
           Return to Dashboard
         </button>
       </div>
@@ -56,14 +56,14 @@ export const ClassDetail = () => {
       </button>
 
       {/* Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-700 p-8 sm:p-10 shadow-lg text-white">
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[var(--app-accent)] to-[var(--app-accent-2)] p-8 sm:p-10 shadow-lg text-white">
         <div className="relative z-10 flex flex-col sm:flex-row justify-between items-start sm:items-end">
           <div className="max-w-2xl">
             <h1 className="text-4xl font-extrabold mb-3 tracking-tight">{cls.name}</h1>
-            <p className="text-blue-100 text-lg opacity-90 leading-relaxed mb-4">{cls.description}</p>
+            <p className="text-white/80 text-lg opacity-90 leading-relaxed mb-4">{cls.description}</p>
             {isTeacher && (
               <div className="inline-flex items-center bg-white/20 backdrop-blur-sm rounded-lg px-4 py-2 mt-2">
-                <span className="text-sm font-medium uppercase tracking-wider text-blue-50">Class Code</span>
+                <span className="text-sm font-medium uppercase tracking-wider text-white/80">Class Code</span>
                 <span className="mx-3 w-px h-4 bg-white/40"></span>
                 <span className="font-mono font-bold text-lg tracking-widest">{cls.code}</span>
               </div>
@@ -72,7 +72,7 @@ export const ClassDetail = () => {
           {isTeacher && (
             <button
               onClick={() => setIsModalOpen(true)}
-              className="mt-6 sm:mt-0 flex items-center space-x-2 px-5 py-2.5 bg-white text-blue-700 hover:bg-slate-50 rounded-lg font-semibold shadow-md transition-all active:scale-95 whitespace-nowrap"
+              className="mt-6 sm:mt-0 flex items-center space-x-2 px-5 py-2.5 bg-white text-[var(--app-accent)] hover:bg-slate-50 rounded-lg font-semibold shadow-md transition-all active:scale-95 whitespace-nowrap"
             >
               <Plus className="w-5 h-5" />
               <span>New Assignment</span>
@@ -82,13 +82,13 @@ export const ClassDetail = () => {
         
         {/* Decorative elements */}
         <div className="absolute top-0 right-0 -mt-10 -mr-10 w-64 h-64 bg-white opacity-5 rounded-full blur-3xl mix-blend-overlay"></div>
-        <div className="absolute bottom-0 right-40 -mb-10 w-40 h-40 bg-indigo-400 opacity-20 rounded-full blur-2xl mix-blend-overlay"></div>
+        <div className="absolute bottom-0 right-40 -mb-10 w-40 h-40 bg-[var(--app-accent-2)] opacity-20 rounded-full blur-2xl mix-blend-overlay"></div>
       </div>
 
       {/* Assignments List */}
       <div className="mt-12">
         <h2 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center mb-6">
-          <FileText className="w-6 h-6 mr-3 text-blue-600 dark:text-blue-500" />
+          <FileText className="w-6 h-6 mr-3 text-[var(--app-accent)]" />
           Classwork ({classAssignments.length})
         </h2>
 
@@ -119,11 +119,11 @@ export const ClassDetail = () => {
                     className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 sm:p-6 shadow-sm hover:shadow-md transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                   >
                     <div className="flex items-start space-x-4">
-                      <div className="flex-shrink-0 w-12 h-12 bg-blue-50 dark:bg-blue-900/30 rounded-full flex items-center justify-center text-blue-600 dark:text-blue-400 mt-1">
+                      <div className="flex-shrink-0 w-12 h-12 bg-[color-mix(in_srgb,var(--app-accent)_10%,var(--app-surface))] rounded-full flex items-center justify-center text-[var(--app-accent)] mt-1">
                         <FileText className="w-6 h-6" />
                       </div>
                       <div>
-                        <h3 className="text-lg font-semibold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                        <h3 className="text-lg font-semibold text-slate-900 dark:text-white group-hover:text-[var(--app-accent)] dark:group-hover:text-[var(--app-accent)] transition-colors">
                           {assignment.title}
                         </h3>
                         <div className="flex items-center text-xs font-medium text-slate-400 mt-1 mb-1 uppercase tracking-wider">
@@ -146,7 +146,7 @@ export const ClassDetail = () => {
                         <span>Due {format(due, 'MMM d, h:mm a')}</span>
                       </div>
                       
-                      <div className="hidden sm:flex items-center text-sm text-slate-400 group-hover:text-blue-500 mt-2 transition-colors">
+                      <div className="hidden sm:flex items-center text-sm text-slate-400 group-hover:text-[var(--app-accent)] mt-2 transition-colors">
                         View Details <ChevronRight className="w-4 h-4 ml-1" />
                       </div>
                     </div>
@@ -168,7 +168,7 @@ export const ClassDetail = () => {
           >
             <div className="px-6 py-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
               <h2 className="text-xl font-semibold text-slate-900 dark:text-white flex items-center">
-                <FileText className="w-5 h-5 mr-2 text-blue-600" />
+                <FileText className="w-5 h-5 mr-2 text-[var(--app-accent)]" />
                 Create New Assignment
               </h2>
             </div>
@@ -181,7 +181,7 @@ export const ClassDetail = () => {
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:text-white transition-shadow"
+                  className="w-full px-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-[var(--app-ring)] focus:border-[var(--app-accent)] dark:text-white transition-shadow"
                   placeholder="e.g. Midterm Essay: History of the Internet"
                 />
               </div>
@@ -192,7 +192,7 @@ export const ClassDetail = () => {
                   required
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:text-white transition-shadow resize-y"
+                  className="w-full px-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-[var(--app-ring)] focus:border-[var(--app-accent)] dark:text-white transition-shadow resize-y"
                   placeholder="Provide clear instructions for your students..."
                   rows={5}
                 />
@@ -209,7 +209,7 @@ export const ClassDetail = () => {
                         value="text" 
                         checked={submissionType === 'text'} 
                         onChange={() => setSubmissionType('text')} 
-                        className="text-blue-600 focus:ring-blue-500" 
+                        className="text-[var(--app-accent)] focus:ring-[var(--app-ring)]" 
                       />
                       <span className="text-slate-700 dark:text-slate-300 text-sm">Text (Essay)</span>
                     </label>
@@ -220,7 +220,7 @@ export const ClassDetail = () => {
                         value="document" 
                         checked={submissionType === 'document'} 
                         onChange={() => setSubmissionType('document')} 
-                        className="text-blue-600 focus:ring-blue-500" 
+                        className="text-[var(--app-accent)] focus:ring-[var(--app-ring)]" 
                       />
                       <span className="text-slate-700 dark:text-slate-300 text-sm">File (Document)</span>
                     </label>
@@ -234,7 +234,7 @@ export const ClassDetail = () => {
                     type="datetime-local"
                     value={dueDate}
                     onChange={(e) => setDueDate(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:text-white transition-shadow text-sm"
+                    className="w-full px-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-[var(--app-ring)] focus:border-[var(--app-accent)] dark:text-white transition-shadow text-sm"
                   />
                 </div>
               </div>
@@ -249,7 +249,7 @@ export const ClassDetail = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm hover:shadow transition-all active:scale-95"
+                  className="px-5 py-2.5 text-sm font-medium bg-[var(--app-accent)] hover:bg-[color-mix(in_srgb,var(--app-accent)_88%,black)] text-white rounded-lg shadow-sm hover:shadow transition-all active:scale-95"
                 >
                   Publish Assignment
                 </button>

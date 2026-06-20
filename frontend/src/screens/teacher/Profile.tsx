@@ -52,7 +52,7 @@ export const Profile = () => {
   return (
     <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12">
       <div className="flex items-center space-x-3 border-b border-slate-200 dark:border-slate-800 pb-6 mb-8">
-        <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400">
+        <div className="w-12 h-12 bg-[color-mix(in_srgb,var(--app-accent)_12%,var(--app-surface))] rounded-xl flex items-center justify-center text-[var(--app-accent)]">
           <SettingsIcon className="w-6 h-6" />
         </div>
         <div>
@@ -66,7 +66,7 @@ export const Profile = () => {
         <div className="bg-white dark:bg-slate-800 shadow-sm rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden transition-shadow hover:shadow-md">
           <div className="p-6 sm:p-8 space-y-8">
             <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center">
-              <UserIcon className="w-5 h-5 mr-2 text-blue-500" />
+              <UserIcon className="w-5 h-5 mr-2 text-[var(--app-accent)]" />
               Profile Settings
             </h2>
             
@@ -76,14 +76,14 @@ export const Profile = () => {
                   {currentUser.photoUrl ? (
                     <img src={currentUser.photoUrl} alt="Profile" className="w-full h-full object-cover" />
                   ) : (
-                    <div className="w-full h-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                    <div className="w-full h-full bg-[color-mix(in_srgb,var(--app-accent)_14%,var(--app-surface))] flex items-center justify-center text-[var(--app-accent)]">
                       <UserIcon className="w-10 h-10" />
                     </div>
                   )}
                 </div>
                 <button
                   onClick={handlePhotoClick}
-                  className="absolute bottom-0 right-0 p-2 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition-colors transform translate-x-1 translate-y-1 group-hover:scale-110"
+                  className="absolute bottom-0 right-0 p-2 bg-[var(--app-accent)] text-white rounded-full shadow-lg hover:bg-[color-mix(in_srgb,var(--app-accent)_88%,black)] transition-colors transform translate-x-1 translate-y-1 group-hover:scale-110"
                 >
                   <Camera className="w-4 h-4" />
                 </button>
@@ -105,7 +105,7 @@ export const Profile = () => {
                       type="text"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white transition-shadow shadow-sm"
+                      className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-[var(--app-ring)] dark:bg-slate-900 dark:text-white transition-shadow shadow-sm"
                     />
                   </div>
                   
@@ -136,7 +136,7 @@ export const Profile = () => {
             <button
               onClick={handleSaveProfile}
               disabled={isSaving || name === currentUser.name}
-              className="flex items-center space-x-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white rounded-lg font-medium transition-all active:scale-95 disabled:active:scale-100 shadow-sm hover:shadow"
+              className="flex items-center space-x-2 px-6 py-2.5 bg-[var(--app-accent)] hover:bg-[color-mix(in_srgb,var(--app-accent)_88%,black)] disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white rounded-lg font-medium transition-all active:scale-95 disabled:active:scale-100 shadow-sm hover:shadow"
             >
               {isSaving ? <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save className="w-5 h-5" />}
               <span>Save Changes</span>
@@ -147,7 +147,7 @@ export const Profile = () => {
         {/* Card 2: Notifications */}
         <div className="bg-white dark:bg-slate-800 shadow-sm rounded-2xl border border-slate-200 dark:border-slate-700 p-6 sm:p-8 transition-shadow hover:shadow-md">
           <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center mb-6">
-            <Bell className="w-5 h-5 mr-2 text-blue-500" />
+            <Bell className="w-5 h-5 mr-2 text-[var(--app-accent)]" />
             Notifications
           </h2>
           <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700 max-w-2xl">
@@ -161,7 +161,7 @@ export const Profile = () => {
             </div>
             <button
               onClick={toggleNotifications}
-              className={`relative inline-flex h-7 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 ${currentUser.notifications ? 'bg-blue-600' : 'bg-slate-300 dark:bg-slate-600'}`}
+              className={`relative inline-flex h-7 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--app-ring)] focus:ring-offset-2 ${currentUser.notifications ? 'bg-[var(--app-accent)]' : 'bg-slate-300 dark:bg-slate-600'}`}
             >
               <span className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-300 ease-in-out ${currentUser.notifications ? 'translate-x-5' : 'translate-x-0'}`} />
             </button>
@@ -171,7 +171,7 @@ export const Profile = () => {
         {/* Card 3: Preferences */}
         <div className="bg-white dark:bg-slate-800 shadow-sm rounded-2xl border border-slate-200 dark:border-slate-700 p-6 sm:p-8 transition-shadow hover:shadow-md">
           <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center mb-6">
-            {currentUser.theme === 'light' ? <Sun className="w-5 h-5 mr-2 text-amber-500" /> : <Moon className="w-5 h-5 mr-2 text-blue-400" />}
+            {currentUser.theme === 'light' ? <Sun className="w-5 h-5 mr-2 text-amber-500" /> : <Moon className="w-5 h-5 mr-2 text-[var(--app-accent)]" />}
             Preferences
           </h2>
           <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700 max-w-2xl">
@@ -185,10 +185,10 @@ export const Profile = () => {
             </div>
             <button
               onClick={toggleTheme}
-              className={`relative inline-flex h-7 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 ${currentUser.theme === 'dark' ? 'bg-blue-600' : 'bg-slate-300 dark:bg-slate-600'}`}
+              className={`relative inline-flex h-7 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--app-ring)] focus:ring-offset-2 ${currentUser.theme === 'dark' ? 'bg-[var(--app-accent)]' : 'bg-slate-300 dark:bg-slate-600'}`}
             >
               <span className={`pointer-events-none flex items-center justify-center h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-300 ease-in-out ${currentUser.theme === 'dark' ? 'translate-x-5' : 'translate-x-0'}`}>
-                 {currentUser.theme === 'dark' ? <Moon className="w-3.5 h-3.5 text-blue-600" /> : <Sun className="w-3.5 h-3.5 text-amber-500" />}
+                 {currentUser.theme === 'dark' ? <Moon className="w-3.5 h-3.5 text-[var(--app-accent)]" /> : <Sun className="w-3.5 h-3.5 text-amber-500" />}
               </span>
             </button>
           </div>

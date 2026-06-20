@@ -5,6 +5,7 @@ import {
   BookOpen,
   CalendarClock,
   Home,
+  Loader2,
   Menu,
   Settings,
   WandSparkles,
@@ -15,12 +16,15 @@ import { Card, CardContent } from "../../components/ui/Card";
 import { GlobalThemeToggle } from "../../components/theme/GlobalThemeToggle";
 import { ActivityNotificationsPopover } from "../../components/ActivityNotificationsPopover";
 import { useAuth } from "../../context/useAuth";
+import { getRoleThemeStyle } from "../../theme/roleThemes";
 import {
   analyzeSingleSubmission,
+  fetchDocumentPreview,
   fetchSubmissionDetail,
   fetchUserNotifications,
   type ActivityNotification,
   type ClassSubmission,
+  type PreviewDocument,
 } from "./services/teacherClassroomService";
 import { AIExplainabilityPanel } from "./components/AIExplainabilityPanel";
 import { MultiLevelAIDetectionPanel } from "./components/MultiLevelAIDetectionPanel";
@@ -28,6 +32,7 @@ import {
   TeacherSidebar,
   type TeacherSection,
 } from "./components/TeacherSidebar";
+import { navigateBack } from "../../utils/navigation";
 
 const SIDEBAR_ITEMS = [
   { key: "home", label: "Home", icon: Home },
@@ -49,15 +54,25 @@ const asNumber = (value: unknown): number | null => {
   return null;
 };
 
+const isImageSubmission = (submission: ClassSubmission | null): boolean => {
+  if (!submission) return false;
+  return (
+    submission.submissionType === "image" ||
+    submission.fileType?.toLowerCase().startsWith("image/") === true
+  );
+};
+
 export default function SubmissionAnalysisReportPage() {
   const navigate = useNavigate();
   const { submissionId } = useParams<{ submissionId: string }>();
-  const { logout } = useAuth();
+  const { logout, darkMode } = useAuth();
 
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [submission, setSubmission] = useState<ClassSubmission | null>(null);
+  const [imagePreview, setImagePreview] = useState<PreviewDocument | null>(null);
+  const [isImagePreviewLoading, setIsImagePreviewLoading] = useState(false);
   const [notifications, setNotifications] = useState<ActivityNotification[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
@@ -96,6 +111,39 @@ export default function SubmissionAnalysisReportPage() {
     void Promise.all([loadSubmission(), loadNotifications()]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submissionId]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadImagePreview = async () => {
+      if (!submission || !isImageSubmission(submission)) {
+        setImagePreview(null);
+        return;
+      }
+
+      setIsImagePreviewLoading(true);
+      try {
+        const preview = await fetchDocumentPreview("submission", submission.id);
+        if (active) {
+          setImagePreview(preview);
+        }
+      } catch {
+        if (active) {
+          setImagePreview(null);
+        }
+      } finally {
+        if (active) {
+          setIsImagePreviewLoading(false);
+        }
+      }
+    };
+
+    void loadImagePreview();
+
+    return () => {
+      active = false;
+    };
+  }, [submission]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -137,7 +185,10 @@ export default function SubmissionAnalysisReportPage() {
   const metrics = isRecord(details?.metrics) ? details.metrics : null;
 
   return (
-    <div className="h-screen overflow-hidden bg-transparent text-[var(--app-text)]">
+    <div
+      className="role-theme-page h-screen overflow-hidden text-[var(--app-text)]"
+      style={getRoleThemeStyle("teacher", darkMode)}
+    >
       <TeacherSidebar
         items={[...SIDEBAR_ITEMS]}
         activeSection={"classes" as TeacherSection}
@@ -186,7 +237,7 @@ export default function SubmissionAnalysisReportPage() {
         <div className="flex flex-wrap items-center gap-3">
           <Button
             variant="outline"
-            onClick={() => navigate("/teacher/teacher_screen/classes")}
+            onClick={() => navigateBack(navigate, "/teacher/teacher_screen/classes")}
           >
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Classes
@@ -200,10 +251,30 @@ export default function SubmissionAnalysisReportPage() {
             </Button>
           )}
           <Button onClick={() => void handleAnalyze()} disabled={isAnalyzing || !submissionId}>
-            <WandSparkles className="mr-2 h-4 w-4" />
+            {isAnalyzing ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <WandSparkles className="mr-2 h-4 w-4" />
+            )}
             {isAnalyzing ? "Analyzing..." : "Run/Re-run Analysis"}
           </Button>
         </div>
+
+        {isAnalyzing && (
+          <Card className="theme-card">
+            <CardContent className="flex items-start gap-3 p-5">
+              <Loader2 className="mt-0.5 h-5 w-5 animate-spin text-[var(--app-accent)]" />
+              <div>
+                <p className="font-semibold text-[var(--app-text)]">
+                  Checking content using the detection model...
+                </p>
+                <p className="mt-1 text-sm theme-muted">
+                  The analysis report will refresh when processing is complete.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {loading ? (
           <Card className="theme-card">
@@ -231,7 +302,13 @@ export default function SubmissionAnalysisReportPage() {
               </CardContent>
             </Card>
 
-            <MultiLevelAIDetectionPanel submission={submission} details={details} />
+            <MultiLevelAIDetectionPanel
+              submission={submission}
+              details={details}
+              imagePreviewUrl={imagePreview?.dataUrl ?? submission.fileDataUrl ?? null}
+              imagePreviewName={imagePreview?.fileName ?? submission.fileName}
+              imagePreviewLoading={isImagePreviewLoading}
+            />
 
             <AIExplainabilityPanel details={details} />
 

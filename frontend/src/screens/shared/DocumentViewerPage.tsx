@@ -12,6 +12,8 @@ import { motion } from "framer-motion";
 import { Button } from "../../components/ui/Button";
 import { Card, CardContent } from "../../components/ui/Card";
 import { GlobalThemeToggle } from "../../components/theme/GlobalThemeToggle";
+import { useAuth } from "../../context/useAuth";
+import { getRoleThemeStyle } from "../../theme/roleThemes";
 import {
   fetchDocumentPreview,
   type DocumentPreviewType,
@@ -22,6 +24,7 @@ import {
   loadDraftDocument,
   type PreviewableDocument,
 } from "../../utils/documentPreview";
+import { navigateBack } from "../../utils/navigation";
 
 const isPreviewType = (value?: string): value is DocumentPreviewType =>
   value === "activity-attachment" || value === "submission";
@@ -55,6 +58,7 @@ const dataUrlToText = async (dataUrl: string | null): Promise<string | null> => 
 
 export default function DocumentViewerPage() {
   const navigate = useNavigate();
+  const { user, darkMode } = useAuth();
   const { documentType, documentId } = useParams<{
     documentType: string;
     documentId: string;
@@ -129,11 +133,16 @@ export default function DocumentViewerPage() {
     document?.fileName.toLowerCase().endsWith(".pdf") ||
     false;
 
+  const role = user?.role ?? "teacher";
+
   return (
-    <div className="h-screen overflow-hidden bg-transparent text-[var(--app-text)]">
+    <div
+      className="role-theme-page h-screen overflow-hidden text-[var(--app-text)]"
+      style={getRoleThemeStyle(role, darkMode)}
+    >
       <header className="fixed left-0 right-0 top-0 z-20 h-16 border-b theme-border bg-[color-mix(in_srgb,var(--app-bg)_72%,transparent)] backdrop-blur-xl">
         <div className="mx-auto flex h-full max-w-6xl items-center justify-between px-4 sm:px-6">
-          <Button variant="outline" onClick={() => navigate(-1)}>
+          <Button variant="outline" onClick={() => navigateBack(navigate, "/auth/login_screen")}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back
           </Button>
@@ -215,7 +224,7 @@ export default function DocumentViewerPage() {
             <Card className="theme-card overflow-hidden">
               <CardContent className="p-0">
                 {isImage && document.dataUrl ? (
-                  <div className="flex min-h-[60vh] items-center justify-center bg-black/30 p-4">
+                  <div className="flex min-h-[60vh] items-center justify-center bg-[color-mix(in_srgb,var(--app-bg)_72%,black)] p-4">
                     <img
                       src={document.dataUrl}
                       alt={document.fileName}

@@ -16,24 +16,33 @@ import toast from "react-hot-toast";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { GlobalThemeToggle } from "../../components/theme/GlobalThemeToggle";
+import { AppLogo } from "../../components/AppLogo";
+import { DashboardSkeleton } from "../../components/DashboardSkeleton";
 import {
   Avatar,
   AvatarFallback,
   AvatarImage,
 } from "../../components/ui/avatar";
 import { useAuth } from "../../context/useAuth";
+import {
+  RECONNECTED_EVENT,
+  useNetworkStatus,
+} from "../../context/NetworkStatusContext";
+import { getRoleThemeStyle } from "../../theme/roleThemes";
 import { ActivityNotificationsPopover } from "../../components/ActivityNotificationsPopover";
 import {
   analyzeSingleSubmission,
   analyzeAllClassSubmissions,
   createClassActivity,
   createTeacherClass,
+  deleteNotification,
   fetchClassActivities,
   fetchClassStudents,
   fetchClassSubmissions,
   fetchTeacherAnalytics,
   fetchTeacherOverview,
   fetchUserNotifications,
+  markNotificationRead,
   type ActivityNotification,
   type ActivitySubmissionType,
   type ClassActivity,
@@ -101,6 +110,12 @@ const VALID_SECTIONS: Section[] = [
   "settings",
 ];
 
+const MIN_DASHBOARD_SKELETON_MS = 1000;
+const wait = (duration: number) =>
+  new Promise<void>((resolve) => {
+    window.setTimeout(resolve, duration);
+  });
+
 const isValidSection = (value?: string): value is Section =>
   Boolean(value && VALID_SECTIONS.includes(value as Section));
 
@@ -116,30 +131,19 @@ const resolveSection = (value?: string): Section => {
   return isValidSection(value) ? value : DEFAULT_SECTION;
 };
 
-const getProbabilityTone = (probability: number | null) => {
-  if (probability === null) {
-    return "bg-[color-mix(in_srgb,var(--app-muted)_25%,transparent)] text-[var(--app-text)]";
-  }
-
-  if (probability >= 80) {
-    return "bg-rose-500/20 text-rose-300";
-  }
-
-  if (probability >= 60) {
-    return "bg-amber-500/20 text-amber-300";
-  }
-
-  return "bg-emerald-500/20 text-emerald-300";
-};
-
 export default function TeacherScreen() {
   const navigate = useNavigate();
-  const { section } = useParams<{ section?: string }>();
-  const { user, logout } = useAuth();
+  const { section, activityId } = useParams<{
+    section?: string;
+    activityId?: string;
+  }>();
+  const { user, logout, darkMode } = useAuth();
+  const { online } = useNetworkStatus();
   const mainScrollRef = useRef<HTMLElement | null>(null);
   const welcomeSeenRef = useRef<Record<number, boolean>>({});
+  const handledActivityRouteRef = useRef<string | null>(null);
 
-  const activeSection = resolveSection(section);
+  const activeSection = activityId ? "activities" : resolveSection(section);
 
   const teacherName = user?.name ?? "Teacher";
   const hasSeenWelcome = user
@@ -148,6 +152,7 @@ export default function TeacherScreen() {
   const welcomeGreeting = getWelcomeGreeting(user?.created_at, hasSeenWelcome);
 
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [isInitialDashboardLoading, setIsInitialDashboardLoading] = useState(true);
   const [classes, setClasses] = useState<TeacherClass[]>([]);
   const [overviewStudents, setOverviewStudents] = useState<
     TeacherOverviewStudent[]
@@ -214,10 +219,14 @@ export default function TeacherScreen() {
   };
 
   useEffect(() => {
+    if (activityId) {
+      return;
+    }
+
     if (section !== activeSection) {
       navigate(`/teacher/teacher_screen/${activeSection}`, { replace: true });
     }
-  }, [activeSection, navigate, section]);
+  }, [activeSection, activityId, navigate, section]);
 
   useEffect(() => {
     mainScrollRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -287,6 +296,45 @@ export default function TeacherScreen() {
     }
   };
 
+  const handleMarkNotificationRead = async (notificationId: string) => {
+    setNotifications((current) =>
+      current.map((notification) =>
+        notification.id === notificationId
+          ? {
+              ...notification,
+              status: "read",
+              readAt: notification.readAt ?? new Date().toISOString(),
+            }
+          : notification,
+      ),
+    );
+
+    try {
+      await markNotificationRead(notificationId);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to update notification.";
+      toast.error(message);
+      await loadNotifications();
+    }
+  };
+
+  const handleDeleteNotification = async (notificationId: string) => {
+    const previous = notifications;
+    setNotifications((current) =>
+      current.filter((notification) => notification.id !== notificationId),
+    );
+
+    try {
+      await deleteNotification(notificationId);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to delete notification.";
+      toast.error(message);
+      setNotifications(previous);
+    }
+  };
+
   const loadClassManagerData = async (classId: string) => {
     setIsLoadingClassManager(true);
 
@@ -312,11 +360,41 @@ export default function TeacherScreen() {
   };
 
   useEffect(() => {
-    void Promise.all([
-      loadTeacherOverview(),
-      loadTeacherAnalytics(),
-      loadNotifications(),
-    ]);
+    let active = true;
+
+    const loadInitialDashboard = async () => {
+      try {
+        await Promise.all([
+          loadTeacherOverview(),
+          loadTeacherAnalytics(),
+          loadNotifications(),
+          wait(MIN_DASHBOARD_SKELETON_MS),
+        ]);
+      } finally {
+        if (active) {
+          setIsInitialDashboardLoading(false);
+        }
+      }
+    };
+
+    void loadInitialDashboard();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleReconnect = () => {
+      void Promise.all([
+        loadTeacherOverview(),
+        loadTeacherAnalytics(),
+        loadNotifications(),
+      ]);
+    };
+
+    window.addEventListener(RECONNECTED_EVENT, handleReconnect);
+    return () => window.removeEventListener(RECONNECTED_EVENT, handleReconnect);
   }, []);
 
   useEffect(() => {
@@ -355,6 +433,11 @@ export default function TeacherScreen() {
 
   const handleCreateClass = async (event: FormEvent) => {
     event.preventDefault();
+
+    if (!online) {
+      toast.error("Internet access is required to create a class.");
+      return;
+    }
 
     if (isCreatingClass) {
       return;
@@ -409,6 +492,52 @@ export default function TeacherScreen() {
     await loadClassManagerData(classroom.id);
   };
 
+  const closeClassManager = () => {
+    setIsClassManagerOpen(false);
+
+    if (activityId) {
+      navigate("/teacher/teacher_screen/activities", { replace: true });
+    }
+  };
+
+  useEffect(() => {
+    if (!activityId || isLoadingOverview) {
+      return;
+    }
+
+    if (handledActivityRouteRef.current === activityId) {
+      return;
+    }
+
+    const activity = overviewActivities.find((item) => item.id === activityId);
+
+    if (!activity) {
+      handledActivityRouteRef.current = activityId;
+      toast.error("Activity could not be loaded or no longer exists.");
+      navigate("/teacher/teacher_screen/activities", { replace: true });
+      return;
+    }
+
+    const classroom = classes.find((item) => item.id === activity.classId);
+
+    if (!classroom) {
+      handledActivityRouteRef.current = activityId;
+      toast.error("Activity class could not be loaded.");
+      navigate("/teacher/teacher_screen/activities", { replace: true });
+      return;
+    }
+
+    handledActivityRouteRef.current = activityId;
+    void openClassManager(classroom);
+  }, [
+    activityId,
+    classes,
+    isLoadingOverview,
+    navigate,
+    openClassManager,
+    overviewActivities,
+  ]);
+
   const handleSelectActivityAttachment = async (file: File | undefined) => {
     if (!file) {
       return;
@@ -450,6 +579,11 @@ export default function TeacherScreen() {
 
   const handleCreateActivity = async (event: FormEvent) => {
     event.preventDefault();
+
+    if (!online) {
+      toast.error("Internet access is required to create an activity.");
+      return;
+    }
 
     if (!managedClass || isCreatingActivity) {
       return;
@@ -502,6 +636,11 @@ export default function TeacherScreen() {
   };
 
   const handleAnalyzeAll = async () => {
+    if (!online) {
+      toast.error("Internet access is required to analyze submissions.");
+      return;
+    }
+
     if (!managedClass || isAnalyzing) {
       return;
     }
@@ -529,6 +668,11 @@ export default function TeacherScreen() {
   };
 
   const handleAnalyzeSubmission = async (submissionId: string) => {
+    if (!online) {
+      toast.error("Internet access is required to analyze submissions.");
+      return;
+    }
+
     if (!managedClass || isAnalyzing || analyzingSubmissionId) {
       return;
     }
@@ -563,8 +707,10 @@ export default function TeacherScreen() {
   const handleLogout = async () => {
     try {
       await logout();
-    } catch {
-      // Ignore transport issues and keep redirect deterministic.
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to logout.";
+      toast.error(message);
+      return;
     }
 
     navigate("/auth/login_screen", { replace: true });
@@ -576,8 +722,24 @@ export default function TeacherScreen() {
     />
   );
 
+  const openCreateClassModal = () => {
+    if (!online) {
+      toast.error("Internet access is required to create a class.");
+      return;
+    }
+
+    setIsCreateModalOpen(true);
+  };
+
+  if (isInitialDashboardLoading) {
+    return <DashboardSkeleton role="teacher" darkMode={darkMode} />;
+  }
+
   return (
-    <div className="h-screen overflow-hidden bg-transparent text-[var(--app-text)]">
+    <div
+      className="role-theme-page h-screen overflow-hidden text-[var(--app-text)]"
+      style={getRoleThemeStyle("teacher", darkMode)}
+    >
       <TeacherSidebar
         items={[...SIDEBAR_ITEMS]}
         activeSection={activeSection}
@@ -596,6 +758,7 @@ export default function TeacherScreen() {
             >
               <Menu className="h-5 w-5" />
             </button>
+            <AppLogo variant="icon" iconClassName="hidden h-10 w-10 rounded-xl sm:grid" />
             <div className="min-w-0">
               <p className="text-xs theme-muted">
                 Teacher Panel - {activeSection}
@@ -615,6 +778,12 @@ export default function TeacherScreen() {
               onToggle={() => setNotificationsOpen((current) => !current)}
               onClose={() => setNotificationsOpen(false)}
               onRefresh={() => void loadNotifications()}
+              onMarkRead={(notificationId) =>
+                void handleMarkNotificationRead(notificationId)
+              }
+              onDelete={(notificationId) =>
+                void handleDeleteNotification(notificationId)
+              }
             />
             <Avatar className="h-9 w-9 border theme-border">
               {user?.profileImageUrl ? (
@@ -643,7 +812,7 @@ export default function TeacherScreen() {
               activityCount={overviewActivities.length}
               upcomingCount={upcomingActivities.length}
               analytics={analytics}
-              onCreateClass={() => setIsCreateModalOpen(true)}
+              onCreateClass={openCreateClassModal}
               onOpenSection={goToSection}
               onOpenIntegrityAnalytics={() =>
                 navigate("/teacher/integrity-analytics")
@@ -657,7 +826,7 @@ export default function TeacherScreen() {
               isLoading={isLoadingOverview}
               latestCreatedCode={latestCreatedCode}
               copiedCode={copiedCode}
-              onCreateClass={() => setIsCreateModalOpen(true)}
+              onCreateClass={openCreateClassModal}
               onCopyCode={(code) => void handleCopyCode(code)}
               onManageClass={(classroom) => void openClassManager(classroom)}
             />
@@ -674,6 +843,9 @@ export default function TeacherScreen() {
             <TeacherActivitiesSection
               activities={overviewActivities}
               isLoading={isLoadingOverview}
+              onOpenActivity={(activity) =>
+                navigate(`/teacher/activities/${activity.id}`)
+              }
             />
           )}
 
@@ -772,7 +944,7 @@ export default function TeacherScreen() {
                   >
                     Cancel
                   </Button>
-                  <Button type="submit" disabled={isCreatingClass}>
+                  <Button type="submit" disabled={isCreatingClass || !online} title={!online ? "Internet access is required." : undefined}>
                     <Sparkles className="mr-2 h-4 w-4" />
                     {isCreatingClass ? "Creating..." : "Create Class"}
                   </Button>
@@ -797,7 +969,8 @@ export default function TeacherScreen() {
         isAnalyzing={isAnalyzing}
         analyzingSubmissionId={analyzingSubmissionId}
         expandedSubmissionId={expandedSubmissionId}
-        onClose={() => setIsClassManagerOpen(false)}
+        focusedActivityId={activityId ?? null}
+        onClose={closeClassManager}
         onAnalyzeAll={handleAnalyzeAll}
         onAnalyzeSubmission={(submissionId) =>
           void handleAnalyzeSubmission(submissionId)
@@ -825,7 +998,6 @@ export default function TeacherScreen() {
             current === submissionId ? null : submissionId,
           )
         }
-        getProbabilityTone={getProbabilityTone}
       />
     </div>
   );

@@ -1,8 +1,8 @@
 import path from "path";
 import fs from "fs/promises";
+import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { fileURLToPath } from "url";
 import sharp from "sharp";
-import * as tf from "@tensorflow/tfjs";
 
 type ImageAnalysisResult = {
   aiProbability: number;
@@ -12,28 +12,63 @@ type ImageAnalysisResult = {
   details: Record<string, unknown>;
 };
 
-type ImageModelBundle = {
-  model: tf.LayersModel;
-  labels: string[] | null;
+type ImagePredictionLabel = "Human" | "AI-generated" | "Needs Review";
+
+type ImageClassProbability = {
+  label: "Human" | "AI-generated";
+  probability: number;
 };
 
-type ModelJson = {
-  modelTopology: unknown;
-  weightsManifest?: Array<{
-    paths: string[];
-    weights: tf.io.WeightsManifestEntry[];
-  }>;
-  trainingConfig?: tf.io.TrainingConfig;
-  userDefinedMetadata?: Record<string, unknown>;
+type EfficientNetV2Prediction = {
+  label: ImagePredictionLabel;
+  modelLabel?: "Human" | "AI-generated";
+  confidence: number;
+  aiProbability: number;
+  humanProbability: number;
+  threshold: number;
+  humanConfidentMax: number;
+  aiConfidentMin: number;
+  message: string;
+  classNames: Array<"Human" | "AI-generated">;
+  probabilities: ImageClassProbability[];
+  rawOutput?: number[];
+  timings?: Record<string, number>;
+  preprocessing?: Record<string, unknown>;
 };
-
-let loadedModelBundle: ImageModelBundle | null = null;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const CLASS_NAMES = ["Human", "AI-generated"] as const;
+const MODEL_FILE_NAME = "efficientnetv2_ai_human.keras";
+const LABELS_FILE_NAME = "labels.json";
+const CONFIGURED_PYTHON_EXECUTABLE =
+  process.env.PYTHON_EXECUTABLE ?? process.env.PYTHON_PATH;
+const PYTHON_EXECUTABLE = CONFIGURED_PYTHON_EXECUTABLE ?? "python";
+const PYTHON_EXECUTABLE_ARGS: string[] = [];
+const PREDICTOR_TIMEOUT_MS = Number(
+  process.env.IMAGE_PREDICTOR_TIMEOUT_MS ?? 120_000,
+);
+const IMAGE_AI_THRESHOLD = Number(process.env.IMAGE_AI_THRESHOLD ?? 0.5);
+const IMAGE_HUMAN_CONFIDENT_MAX = Number(
+  process.env.IMAGE_HUMAN_CONFIDENT_MAX ?? 0.40,
+);
+const IMAGE_AI_CONFIDENT_MIN = Number(
+  process.env.IMAGE_AI_CONFIDENT_MIN ?? 0.60,
+);
+
 const clamp = (value: number, min = 0, max = 100): number => {
   return Math.min(max, Math.max(min, value));
+};
+
+const toPercent = (value: unknown): number => {
+  const numberValue = Number(value);
+
+  if (!Number.isFinite(numberValue)) {
+    throw new Error("EfficientNetV2 predictor returned an invalid score.");
+  }
+
+  return clamp(numberValue >= 0 && numberValue <= 1 ? numberValue * 100 : numberValue);
 };
 
 const getConfidenceLevel = (score: number): string => {
@@ -60,14 +95,44 @@ const dataUrlToBuffer = (dataUrl?: string | null): Buffer | null => {
   return Buffer.from(base64, "base64");
 };
 
-const bufferToArrayBuffer = (buffer: Buffer): ArrayBuffer => {
-  return buffer.buffer.slice(
-    buffer.byteOffset,
-    buffer.byteOffset + buffer.byteLength,
-  ) as ArrayBuffer;
+const fileExists = async (filePath: string): Promise<boolean> => {
+  try {
+    const stats = await fs.stat(filePath);
+    return stats.isFile();
+  } catch {
+    return false;
+  }
 };
 
-const getModelPath = (): string => {
+type ImageModelAssets = {
+  modelPath: string;
+  labelsPath: string;
+};
+
+const getLabelsPath = async (modelDirectory: string): Promise<string> => {
+  const configuredPath = process.env.IMAGE_LABELS_PATH;
+
+  if (configuredPath) {
+    const resolvedPath = path.resolve(
+      configuredPath.startsWith("file://")
+        ? fileURLToPath(configuredPath)
+        : configuredPath,
+    );
+
+    if (await fileExists(resolvedPath)) return resolvedPath;
+    throw new Error(`labels.json file was not found: ${resolvedPath}`);
+  }
+
+  const labelsPath = path.join(modelDirectory, LABELS_FILE_NAME);
+
+  if (await fileExists(labelsPath)) return labelsPath;
+
+  throw new Error(
+    `labels.json file was not found in ${modelDirectory}. Add ${LABELS_FILE_NAME} next to ${MODEL_FILE_NAME}, or set IMAGE_LABELS_PATH.`,
+  );
+};
+
+const getImageModelAssets = async (): Promise<ImageModelAssets> => {
   const configuredPath = process.env.IMAGE_MODEL_PATH;
 
   if (configuredPath) {
@@ -76,126 +141,383 @@ const getModelPath = (): string => {
       : configuredPath;
 
     const resolvedPath = path.resolve(filePath);
-    return path.extname(resolvedPath).toLowerCase() === ".json"
-      ? resolvedPath
-      : path.join(resolvedPath, "model.json");
+
+    if (path.extname(resolvedPath).toLowerCase() === ".json") {
+      throw new Error(
+        `IMAGE_MODEL_PATH points to a JSON file. Set it to ${MODEL_FILE_NAME} or its containing folder, and use IMAGE_LABELS_PATH for labels when needed.`,
+      );
+    }
+
+    if (path.extname(resolvedPath).toLowerCase() === ".keras") {
+      if (!(await fileExists(resolvedPath))) {
+        throw new Error(`EfficientNetV2 model file was not found: ${resolvedPath}`);
+      }
+
+      return {
+        modelPath: resolvedPath,
+        labelsPath: await getLabelsPath(path.dirname(resolvedPath)),
+      };
+    }
+
+    return findImageModelInDirectory(resolvedPath);
   }
 
-  return path.resolve(
-    __dirname,
-    "../models/image_model/model.json",
+  const defaultModelDirectories = [path.resolve(__dirname, "../../models")];
+
+  for (const modelDirectory of defaultModelDirectories) {
+    const modelPath = path.join(modelDirectory, MODEL_FILE_NAME);
+
+    if (await fileExists(modelPath)) {
+      return await findImageModelInDirectory(modelDirectory);
+    }
+  }
+
+  throw new Error(
+    `EfficientNetV2 model file was not found. Add ${MODEL_FILE_NAME} and ${LABELS_FILE_NAME} to models/, or set IMAGE_MODEL_PATH and IMAGE_LABELS_PATH.`,
   );
 };
 
-const loadClassLabels = async (modelDirectory: string): Promise<string[] | null> => {
-  try {
-    const metadataPath = path.join(modelDirectory, "metadata.json");
-    const metadata = JSON.parse(await fs.readFile(metadataPath, "utf-8"));
-    return Array.isArray(metadata?.labels)
-      ? metadata.labels.map((label: unknown) => String(label))
-      : null;
-  } catch {
-    return null;
+const findImageModelInDirectory = async (
+  modelDirectory: string,
+): Promise<ImageModelAssets> => {
+  const modelPath = path.join(modelDirectory, MODEL_FILE_NAME);
+
+  if (await fileExists(modelPath)) {
+    return {
+      modelPath,
+      labelsPath: await getLabelsPath(modelDirectory),
+    };
   }
+
+  throw new Error(
+    `EfficientNetV2 model file was not found in ${modelDirectory}. Add ${MODEL_FILE_NAME}, or set IMAGE_MODEL_PATH.`,
+  );
 };
 
-const loadImageModel = async (): Promise<ImageModelBundle> => {
-  if (loadedModelBundle) return loadedModelBundle;
+const normalizePredictionLabel = (label: unknown): ImagePredictionLabel => {
+  const normalized = String(label ?? "").trim().toLowerCase();
 
-  const modelPath = getModelPath();
-  const modelDirectory = path.dirname(modelPath);
-  const modelJson = JSON.parse(await fs.readFile(modelPath, "utf-8")) as ModelJson;
-  const weightsManifest = modelJson.weightsManifest ?? [];
-
-  if (!modelJson.modelTopology || weightsManifest.length === 0) {
-    throw new Error(
-      "Invalid image model. Expected TensorFlow.js model.json with modelTopology and weightsManifest.",
-    );
+  if (normalized === "human") return "Human";
+  if (normalized === "ai-generated" || normalized === "ai generated") {
+    return "AI-generated";
+  }
+  if (normalized === "needs review" || normalized === "uncertain") {
+    return "Needs Review";
   }
 
-  const weightSpecs = weightsManifest.flatMap((group) => group.weights);
-  const weightData = tf.io.concatenateArrayBuffers(
-    await Promise.all(
-      weightsManifest.flatMap((group) =>
-        group.paths.map(async (relativePath) => {
-          const weightPath = path.resolve(modelDirectory, relativePath);
-          return bufferToArrayBuffer(await fs.readFile(weightPath));
-        }),
-      ),
-    ),
+  throw new Error(
+    `Unexpected image model label "${String(label)}". Use Human, AI-generated, or Needs Review.`,
   );
+};
 
-  const model = await tf.loadLayersModel(
-    tf.io.fromMemory({
-      modelTopology: modelJson.modelTopology,
-      weightSpecs,
-      weightData,
-      trainingConfig: modelJson.trainingConfig,
-      userDefinedMetadata: modelJson.userDefinedMetadata,
-    }),
+const normalizeModelLabel = (label: unknown): "Human" | "AI-generated" => {
+  const normalized = normalizePredictionLabel(label);
+
+  if (normalized === "Needs Review") {
+    throw new Error("EfficientNetV2 model label cannot be Needs Review.");
+  }
+
+  return normalized;
+};
+
+const parsePredictorJson = (output: string): EfficientNetV2Prediction => {
+  const payload = JSON.parse(output) as Record<string, unknown>;
+
+  if (typeof payload.error === "string") {
+    throw new Error(payload.error);
+  }
+
+  const label = normalizePredictionLabel(payload.label);
+  const modelLabel =
+    typeof payload.modelLabel === "string"
+      ? normalizeModelLabel(payload.modelLabel)
+      : undefined;
+  const confidence = toPercent(payload.confidence);
+  const aiProbability = toPercent(payload.aiProbability);
+  const humanProbability = toPercent(payload.humanProbability);
+  const threshold = Number(payload.threshold ?? IMAGE_AI_THRESHOLD);
+  const humanConfidentMax = Number(
+    payload.humanConfidentMax ?? IMAGE_HUMAN_CONFIDENT_MAX,
   );
+  const aiConfidentMin = Number(
+    payload.aiConfidentMin ?? IMAGE_AI_CONFIDENT_MIN,
+  );
+  const message =
+    typeof payload.message === "string"
+      ? payload.message
+      : "Image analysis completed.";
 
-  loadedModelBundle = {
-    model,
-    labels: await loadClassLabels(modelDirectory),
+  const probabilities = Array.isArray(payload.probabilities)
+    ? payload.probabilities.map((entry) => {
+        const candidate = entry as Record<string, unknown>;
+
+        return {
+          label: normalizeModelLabel(candidate.label),
+          probability: toPercent(candidate.probability),
+        };
+      })
+    : [];
+
+  const rawOutput = Array.isArray(payload.rawOutput)
+    ? payload.rawOutput
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value))
+    : undefined;
+  const timings =
+    typeof payload.timings === "object" && payload.timings !== null
+      ? Object.fromEntries(
+          Object.entries(payload.timings as Record<string, unknown>)
+            .map(([key, value]) => [key, Number(value)])
+            .filter(([, value]) => Number.isFinite(value)),
+        )
+      : undefined;
+  const preprocessing =
+    typeof payload.preprocessing === "object" && payload.preprocessing !== null
+      ? (payload.preprocessing as Record<string, unknown>)
+      : undefined;
+
+  const result: EfficientNetV2Prediction = {
+    label,
+    confidence,
+    aiProbability,
+    humanProbability,
+    threshold,
+    humanConfidentMax,
+    aiConfidentMin,
+    message,
+    classNames: [...CLASS_NAMES],
+    probabilities,
   };
 
-  return loadedModelBundle;
-};
-
-const preprocessImage = async (imageBuffer: Buffer): Promise<tf.Tensor4D> => {
-  const resized = await sharp(imageBuffer)
-    .resize(224, 224)
-    .removeAlpha()
-    .raw()
-    .toBuffer();
-
-  const tensor = tf.tensor3d(new Uint8Array(resized), [224, 224, 3]);
-  const normalized = tensor.div(255);
-  const batched = normalized.expandDims(0) as tf.Tensor4D;
-
-  tensor.dispose();
-  normalized.dispose();
-
-  return batched;
-};
-
-const getClassProbabilities = (
-  values: number[],
-  labels: string[] | null,
-): Array<{ label: string; probability: number }> => {
-  return values.map((value, index) => ({
-    label: labels?.[index] ?? `Class ${index + 1}`,
-    probability: clamp(Number((value * 100).toFixed(2))),
-  }));
-};
-
-const findAiClassIndex = (labels: string[] | null): number | null => {
-  if (!labels?.length) return null;
-
-  const aiPattern = /\b(ai|artificial|generated|synthetic|fake)\b/i;
-  const humanPattern = /\b(human|real|authentic|original|non-ai|non ai)\b/i;
-
-  const aiIndex = labels.findIndex(
-    (label) => aiPattern.test(label) && !humanPattern.test(label),
-  );
-
-  if (aiIndex >= 0) return aiIndex;
-
-  const humanIndex = labels.findIndex((label) => humanPattern.test(label));
-  return labels.length === 2 && humanIndex >= 0 ? 1 - humanIndex : null;
-};
-
-const getAiProbability = (values: number[], labels: string[] | null): number => {
-  if (values.length === 1) {
-    return (values[0] ?? 0) * 100;
+  if (modelLabel) {
+    result.modelLabel = modelLabel;
   }
 
-  const aiClassIndex = findAiClassIndex(labels);
-  const selectedValue =
-    aiClassIndex !== null ? values[aiClassIndex] ?? 0 : Math.max(...values, 0);
+  if (rawOutput) {
+    result.rawOutput = rawOutput;
+  }
 
-  return selectedValue * 100;
+  if (timings) {
+    result.timings = timings;
+  }
+
+  if (preprocessing) {
+    result.preprocessing = preprocessing;
+  }
+
+  return result;
+};
+
+type PendingPrediction = {
+  resolve: (prediction: EfficientNetV2Prediction) => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+};
+
+type ImagePredictorWorker = {
+  child: ChildProcessWithoutNullStreams;
+  assetKey: string;
+  pending: Map<string, PendingPrediction>;
+  ready: Promise<void>;
+  stop: () => void;
+};
+
+let imagePredictorWorker: ImagePredictorWorker | null = null;
+let predictionRequestId = 0;
+
+const createImagePredictorWorker = async (
+  modelPath: string,
+  labelsPath: string,
+): Promise<ImagePredictorWorker> => {
+  const predictorPath = path.resolve(__dirname, "efficientnetv2_predict.py");
+
+  if (!(await fileExists(predictorPath))) {
+    throw new Error(`Python predictor script was not found: ${predictorPath}`);
+  }
+
+  const assetKey = `${modelPath}::${labelsPath}`;
+  const child = spawn(
+    PYTHON_EXECUTABLE,
+    [...PYTHON_EXECUTABLE_ARGS, predictorPath, "--worker", modelPath, labelsPath],
+    {
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+  const pending = new Map<string, PendingPrediction>();
+  let stdoutBuffer = "";
+  let stderrTail = "";
+  let readyResolve: (() => void) | null = null;
+  let readyReject: ((error: Error) => void) | null = null;
+  const ready = new Promise<void>((resolve, reject) => {
+    readyResolve = resolve;
+    readyReject = reject;
+  });
+  const readyTimer = setTimeout(() => {
+    readyReject?.(
+      new Error(
+        `EfficientNetV2 worker did not become ready after ${PREDICTOR_TIMEOUT_MS}ms.`,
+      ),
+    );
+  }, PREDICTOR_TIMEOUT_MS);
+
+  const rejectAll = (error: Error) => {
+    for (const pendingRequest of pending.values()) {
+      clearTimeout(pendingRequest.timer);
+      pendingRequest.reject(error);
+    }
+
+    pending.clear();
+  };
+
+  child.stdout.on("data", (chunk: Buffer) => {
+    stdoutBuffer += chunk.toString("utf-8");
+    const lines = stdoutBuffer.split(/\r?\n/);
+    stdoutBuffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      if (!trimmed.startsWith("{")) {
+        continue;
+      }
+
+      try {
+        const payload = JSON.parse(trimmed) as Record<string, unknown>;
+
+        if (payload.type === "ready") {
+          clearTimeout(readyTimer);
+          console.log(
+            `[image-model] EfficientNetV2 worker ready. threshold=${payload.threshold}, reviewBand=${payload.humanConfidentMax}-${payload.aiConfidentMin}, inputScale=${payload.inputScale}`,
+          );
+          readyResolve?.();
+          continue;
+        }
+
+        const requestId =
+          typeof payload.id === "string" ? payload.id : String(payload.id ?? "");
+        const pendingRequest = pending.get(requestId);
+
+        if (!pendingRequest) {
+          continue;
+        }
+
+        pending.delete(requestId);
+        clearTimeout(pendingRequest.timer);
+
+        if (typeof payload.error === "string") {
+          pendingRequest.reject(new Error(payload.error));
+          continue;
+        }
+
+        pendingRequest.resolve(parsePredictorJson(trimmed));
+      } catch (error) {
+        console.warn(
+          "[image-model] Ignored invalid EfficientNetV2 worker output:",
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+  });
+
+  child.stderr.on("data", (chunk: Buffer) => {
+    stderrTail = `${stderrTail}${chunk.toString("utf-8")}`.slice(-4000);
+  });
+
+  child.on("error", (error) => {
+    clearTimeout(readyTimer);
+    readyReject?.(
+      new Error(
+        `Failed to start Python predictor "${PYTHON_EXECUTABLE}": ${error.message}`,
+      ),
+    );
+    rejectAll(error);
+  });
+
+  child.on("close", (code) => {
+    clearTimeout(readyTimer);
+    const error = new Error(
+      stderrTail.trim() ||
+        `EfficientNetV2 worker exited with code ${code ?? "unknown"}.`,
+    );
+    readyReject?.(error);
+    rejectAll(error);
+
+    if (imagePredictorWorker?.child === child) {
+      imagePredictorWorker = null;
+    }
+  });
+
+  const worker: ImagePredictorWorker = {
+    child,
+    assetKey,
+    pending,
+    ready,
+    stop: () => {
+      child.kill();
+    },
+  };
+
+  try {
+    await ready;
+  } catch (error) {
+    child.kill();
+    throw error;
+  }
+
+  return worker;
+};
+
+const getImagePredictorWorker = async (
+  modelPath: string,
+  labelsPath: string,
+): Promise<ImagePredictorWorker> => {
+  const assetKey = `${modelPath}::${labelsPath}`;
+
+  if (imagePredictorWorker?.assetKey === assetKey) {
+    await imagePredictorWorker.ready;
+    return imagePredictorWorker;
+  }
+
+  imagePredictorWorker?.stop();
+  imagePredictorWorker = await createImagePredictorWorker(modelPath, labelsPath);
+  return imagePredictorWorker;
+};
+
+const runEfficientNetV2Prediction = async (
+  modelPath: string,
+  labelsPath: string,
+  imageBuffer: Buffer,
+): Promise<EfficientNetV2Prediction> => {
+  const worker = await getImagePredictorWorker(modelPath, labelsPath);
+  const requestId = `image-${Date.now()}-${predictionRequestId++}`;
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      worker.pending.delete(requestId);
+      reject(
+        new Error(
+          `EfficientNetV2 prediction timed out after ${PREDICTOR_TIMEOUT_MS}ms.`,
+        ),
+      );
+    }, PREDICTOR_TIMEOUT_MS);
+
+    worker.pending.set(requestId, { resolve, reject, timer });
+    worker.child.stdin.write(
+      `${JSON.stringify({
+        id: requestId,
+        image: imageBuffer.toString("base64"),
+      })}\n`,
+    );
+  });
+};
+
+export const warmUpImageModel = async (): Promise<void> => {
+  const startedAt = Date.now();
+  const { modelPath, labelsPath } = await getImageModelAssets();
+  await getImagePredictorWorker(modelPath, labelsPath);
+  console.log(
+    `[image-model] EfficientNetV2 warm-up complete in ${Date.now() - startedAt}ms.`,
+  );
 };
 
 const inspectImage = async (imageBuffer: Buffer) => {
@@ -232,11 +554,20 @@ const buildImageDetails = ({
   aiProbability,
   humanProbability,
   confidenceScore,
+  predictedLabel,
+  modelLabel,
   fileName,
   imageProfile,
   labels,
   classProbabilities,
+  rawOutput,
   modelStatus,
+  threshold,
+  humanConfidentMax,
+  aiConfidentMin,
+  message,
+  timings,
+  preprocessing,
   warning,
 }: {
   source: string;
@@ -245,11 +576,20 @@ const buildImageDetails = ({
   aiProbability: number;
   humanProbability: number;
   confidenceScore: number;
+  predictedLabel?: ImagePredictionLabel | null;
+  modelLabel?: "Human" | "AI-generated" | null;
   fileName?: string | null;
   imageProfile?: Record<string, unknown> | null;
   labels?: string[] | null;
   classProbabilities?: Array<{ label: string; probability: number }>;
+  rawOutput?: number[];
   modelStatus: Record<string, unknown>;
+  threshold?: number;
+  humanConfidentMax?: number;
+  aiConfidentMin?: number;
+  message?: string;
+  timings?: Record<string, number>;
+  preprocessing?: Record<string, unknown>;
   warning?: string;
 }): Record<string, unknown> => {
   const dimensions =
@@ -265,12 +605,28 @@ const buildImageDetails = ({
     aiProbability,
     humanProbability,
     confidenceScore,
+    finalPrediction: predictedLabel ?? verdict,
+    predictedLabel: predictedLabel ?? verdict,
+    modelLabel: modelLabel ?? null,
+    message,
+    threshold: threshold ?? IMAGE_AI_THRESHOLD,
+    humanConfidentMax: humanConfidentMax ?? IMAGE_HUMAN_CONFIDENT_MAX,
+    aiConfidentMin: aiConfidentMin ?? IMAGE_AI_CONFIDENT_MIN,
     confidenceLevel: getConfidenceLevel(confidenceScore),
     riskBand: getRiskBand(aiProbability),
     fileName: fileName ?? null,
     modelInputSize: "224x224",
+    preprocessing:
+      preprocessing ?? {
+        convertToRgb: true,
+        exifOrientationHandled: true,
+        resize: "224x224",
+        inputScale: process.env.IMAGE_MODEL_INPUT_SCALE ?? "0_1",
+      },
+    timings: timings ?? null,
     classLabels: labels ?? null,
     classProbabilities: classProbabilities ?? [],
+    rawOutput: rawOutput ?? [],
     imageProfile: imageProfile ?? null,
     warning,
     scoreCards: [
@@ -284,11 +640,11 @@ const buildImageDetails = ({
       },
       {
         id: "humanProbability",
-        label: "Authentic probability",
+        label: "Human probability",
         value: humanProbability,
         unit: "%",
         tone: humanProbability >= 60 ? "calm" : "risk",
-        description: "Inverse estimate that the image is authentic or human-created.",
+        description: "Model estimate that the image is human-created.",
       },
       {
         id: "confidenceScore",
@@ -321,6 +677,14 @@ const buildImageDetails = ({
         detail: modelStatus.message,
       },
       {
+        label: "Threshold review",
+        status: predictedLabel === "Needs Review" ? "needs-review" : "complete",
+        detail:
+          predictedLabel === "Needs Review"
+            ? `AI probability is inside the review band (${((humanConfidentMax ?? IMAGE_HUMAN_CONFIDENT_MAX) * 100).toFixed(0)}%-${((aiConfidentMin ?? IMAGE_AI_CONFIDENT_MIN) * 100).toFixed(0)}%).`
+            : `Decision threshold ${((threshold ?? IMAGE_AI_THRESHOLD) * 100).toFixed(0)}% with review band applied.`,
+      },
+      {
         label: "Class probability review",
         status: classProbabilities?.length ? "complete" : "needs-review",
         detail: classProbabilities?.length
@@ -345,7 +709,7 @@ const buildImageDetails = ({
         label: "Review reliability",
         value: modelStatus.loaded ? "Model-backed" : "Needs model setup",
         detail:
-          "Image detection is strongest when a trained TensorFlow.js model is available.",
+          "Image detection is strongest when the trained EfficientNetV2 Keras model is available.",
       },
     ],
     reviewChecklist: [
@@ -376,6 +740,7 @@ export const analyzeImage = async (
   fileDataUrl?: string | null,
   fileName?: string | null,
 ): Promise<ImageAnalysisResult> => {
+  const requestStartedAt = Date.now();
   const imageBuffer = dataUrlToBuffer(fileDataUrl);
 
   if (!imageBuffer) {
@@ -401,47 +766,79 @@ export const analyzeImage = async (
   }
 
   try {
+    const metadataStartedAt = Date.now();
     const imageProfile = await inspectImage(imageBuffer);
-    const { model, labels } = await loadImageModel();
-    const input = await preprocessImage(imageBuffer);
-
-    const prediction = model.predict(input) as tf.Tensor;
-    const values = Array.from(await prediction.data());
-
-    input.dispose();
-    prediction.dispose();
-
-    const aiScoreRaw = getAiProbability(values, labels);
-
-    const aiProbability = clamp(Number(aiScoreRaw.toFixed(2)));
-    const humanProbability = Number((100 - aiProbability).toFixed(2));
-    const confidenceScore = Number(
-      Math.max(aiProbability, humanProbability).toFixed(2),
+    const metadataMs = Date.now() - metadataStartedAt;
+    const { modelPath, labelsPath } = await getImageModelAssets();
+    const prediction = await runEfficientNetV2Prediction(
+      modelPath,
+      labelsPath,
+      imageBuffer,
     );
-    const classProbabilities = getClassProbabilities(values, labels);
+    const aiProbability =
+      prediction.probabilities.find((entry) => entry.label === "AI-generated")
+        ?.probability ?? (prediction.label === "AI-generated" ? prediction.confidence : 0);
+    const humanProbability =
+      prediction.probabilities.find((entry) => entry.label === "Human")
+        ?.probability ?? prediction.humanProbability;
+    const confidenceScore = prediction.confidence;
+    const classProbabilities =
+      prediction.probabilities.length > 0
+        ? prediction.probabilities
+        : [
+            {
+              label: "Human" as const,
+              probability: humanProbability,
+            },
+            {
+              label: "AI-generated" as const,
+              probability: aiProbability,
+            },
+          ];
+    const totalRequestMs = Date.now() - requestStartedAt;
+    const timings = {
+      ...(prediction.timings ?? {}),
+      metadataMs,
+      requestTotalMs: totalRequestMs,
+    };
+
+    console.log(
+      `[image-model] ${fileName ?? "image"} prediction=${prediction.label} ai=${aiProbability.toFixed(2)}% human=${humanProbability.toFixed(2)}% total=${totalRequestMs}ms`,
+    );
 
     return {
       aiProbability,
       humanProbability,
       confidenceScore,
-      isAIGenerated: aiProbability >= 60,
+      isAIGenerated: prediction.label === "AI-generated",
       details: buildImageDetails({
-        source: "local-image-model",
-        provider: "Local TensorFlow.js Image Model",
-        verdict:
-          aiProbability >= 60
-            ? "Likely AI-generated image"
-            : "Likely authentic or human-created image",
+        source: "local-efficientnetv2-model",
+        provider: "Local EfficientNetV2 Keras Image Model",
+        verdict: prediction.label,
+        predictedLabel: prediction.label,
+        modelLabel: prediction.modelLabel ?? null,
         aiProbability,
         humanProbability,
         confidenceScore,
         fileName: fileName ?? null,
         imageProfile,
-        labels,
+        labels: prediction.classNames,
         classProbabilities,
+        rawOutput: prediction.rawOutput ?? [],
+        threshold: prediction.threshold,
+        humanConfidentMax: prediction.humanConfidentMax,
+        aiConfidentMin: prediction.aiConfidentMin,
+        message: prediction.message,
+        ...(timings ? { timings } : {}),
+        ...(prediction.preprocessing
+          ? { preprocessing: prediction.preprocessing }
+          : {}),
         modelStatus: {
           loaded: true,
-          message: "Local TensorFlow.js image model loaded and returned class probabilities.",
+          message:
+            "Local EfficientNetV2 Keras model loaded and returned class probabilities.",
+          modelPath,
+          labelsPath,
         },
       }),
     };
@@ -459,6 +856,7 @@ export const analyzeImage = async (
         source: "image-metadata-fallback",
         provider: "Image Metadata Fallback",
         verdict: "Image model is not available or failed to run",
+        predictedLabel: "Needs Review",
         aiProbability: 0,
         humanProbability: 100,
         confidenceScore: 0,
@@ -470,8 +868,10 @@ export const analyzeImage = async (
           loaded: false,
           message,
         },
+        message:
+          "Image analysis could not be completed. Manual review is recommended.",
         warning:
-          "Add a TensorFlow.js model at IMAGE_MODEL_PATH or backend/models/image_model/model.json for model-backed image detection.",
+          `Add ${MODEL_FILE_NAME} and ${LABELS_FILE_NAME} to models/, or set IMAGE_MODEL_PATH and IMAGE_LABELS_PATH for model-backed image detection.`,
       }),
     };
   }

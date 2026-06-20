@@ -1,62 +1,79 @@
-
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
+# Dependencies
 node_modules/
 frontend/node_modules/
 backend/node_modules/
 
-
+# Build output
 dist/
 dist-ssr/
 build/
 frontend/dist/
 backend/dist/
 
-
+# Environment and local config
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
-
 frontend/.env
 backend/.env
-
-
 *.local
 
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
 
+# Logs and temporary files
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.cache/
+.tmp/
+tmp/
+temp/
+*.zip
+*.tar
+*.tar.gz
+
+# Uploads and generated datasets
 backend/uploads/
+uploads/
+kaggle/
+kaggle-output/
+kaggle-outputs/
+submission.csv
+submissions.csv
+*.submission.csv
 
+# Local model binaries
+models/*.keras
+models/*.h5
+models/*.bin
+!models/labels.json
+backend/models/
 
-backend/models/image-detector/
-backend/models/image_model/
+# Coverage and local databases
+coverage/
+*.sqlite
+*.db
 
-
+# Editors and OS files
 .vscode/*
 !.vscode/extensions.json
 .idea/
 .DS_Store
 Thumbs.db
-
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
-
-
-.cache/
-.tmp/
-
-coverage/
-
-
-*.sqlite
-*.db

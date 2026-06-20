@@ -112,23 +112,6 @@ export function StudentEnrolledSection({
                       {activity.mySubmission && (
                         <div className="mt-3 rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)] px-3 py-2 text-xs theme-muted">
                           <p>Status: {activity.mySubmission.status}</p>
-                          {typeof activity.mySubmission.aiProbability === "number" && (
-                            <p>
-                              AI probability: {activity.mySubmission.aiProbability.toFixed(2)}%
-                            </p>
-                          )}
-                          {typeof activity.mySubmission.humanProbability === "number" && (
-                            <p>
-                              Human probability:{" "}
-                              {activity.mySubmission.humanProbability.toFixed(2)}%
-                            </p>
-                          )}
-                          {typeof activity.mySubmission.confidenceScore === "number" && (
-                            <p>
-                              Confidence score:{" "}
-                              {activity.mySubmission.confidenceScore.toFixed(2)}%
-                            </p>
-                          )}
                         </div>
                       )}
 

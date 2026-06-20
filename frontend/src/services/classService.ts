@@ -1,3 +1,18 @@
+import axios, { type AxiosProgressEvent } from "axios";
+import { API_BASE_URL } from "../config/api";
+import {
+  createOfflineActionError,
+  isConnectionAvailable,
+  isLikelyConnectivityError,
+  markBackendReachable,
+  markBackendUnreachable,
+} from "./connectivity";
+import {
+  hasOfflineCache,
+  readOfflineCache,
+  writeOfflineCache,
+} from "./offlineCache";
+
 export type TeacherClass = {
   id: string;
   name: string;
@@ -40,6 +55,9 @@ export type ActivityNotification = {
   eventAt: string;
   dueDate: string | null;
   createdAt: string | null;
+  status: "read" | "unread";
+  readAt: string | null;
+  relatedSubmissionId: string | null;
 };
 
 export type ExplainabilitySignal = {
@@ -56,6 +74,11 @@ export type SuspiciousSentence = {
   reasons: string[];
 };
 
+export type HighlightedToken = {
+  token: string;
+  aiProbability: number;
+};
+
 export type SubmissionAnalysisDetails = {
   source?: string;
   verdict?: string;
@@ -68,6 +91,7 @@ export type SubmissionAnalysisDetails = {
   writingConsistencyScore?: number;
   humanRevisionLikelihood?: number;
   suspiciousSentences?: SuspiciousSentence[];
+  highlightedTokens?: HighlightedToken[];
   explainabilitySignals?: ExplainabilitySignal[];
   [key: string]: unknown;
 };
@@ -219,6 +243,7 @@ export type ClassSubmission = {
   fileName: string | null;
   fileType: string | null;
   fileSize: number | null;
+  fileDataUrl: string | null;
   status: string;
   aiProbability: number | null;
   humanProbability: number | null;
@@ -258,6 +283,8 @@ export type SubmissionAnalysisResult = {
   analysisDetails: SubmissionAnalysisDetails | null;
   updatedAt: string;
 };
+
+export type UploadProgressCallback = (progress: number) => void;
 
 type ApiClass = {
   id: number;
@@ -353,6 +380,7 @@ type ApiSubmission = {
   file_name: string | null;
   file_type?: string | null;
   file_size?: number | string | null;
+  file_data_url?: string | null;
   status: string;
   ai_probability: number | null;
   is_ai_generated: boolean | null;
@@ -432,44 +460,138 @@ type ApiActivityNotification = {
   eventAt: string;
   dueDate?: string | null;
   createdAt?: string | null;
+  status?: "read" | "unread";
+  readAt?: string | null;
+  relatedSubmissionId?: string | number | null;
 };
 
-const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL ??
-  (import.meta.env.DEV ? "http://localhost:5000/api" : "/api")
-).replace(/\/$/, "");
 const API_URL = `${API_BASE_URL}/classes`;
+const CLASS_CACHE_SCOPE = "classes";
+
+const getRequestCacheKey = (path: string) => `GET:${path}`;
+
+const readCachedRequest = <T,>(path: string) =>
+  readOfflineCache<T>(CLASS_CACHE_SCOPE, getRequestCacheKey(path));
+
+const writeCachedRequest = <T,>(path: string, value: T) => {
+  writeOfflineCache(CLASS_CACHE_SCOPE, getRequestCacheKey(path), value);
+};
+
+export const hasCachedClassRequest = (path: string) =>
+  hasOfflineCache(CLASS_CACHE_SCOPE, getRequestCacheKey(path));
 
 async function request<T>(
   path: string,
   options?: {
-    method?: "DELETE" | "GET" | "POST";
+    method?: "DELETE" | "GET" | "PATCH" | "POST";
     body?: Record<string, unknown>;
   },
 ): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
-    method: options?.method ?? "GET",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: options?.body ? JSON.stringify(options.body) : undefined,
-  });
+  const method = options?.method ?? "GET";
 
-  const payload = (await response.json().catch(() => ({}))) as Record<
-    string,
-    unknown
-  >;
+  if (!isConnectionAvailable()) {
+    if (method === "GET") {
+      const cached = readCachedRequest<T>(path);
+      if (cached) return cached;
+    }
 
-  if (!response.ok) {
-    throw new Error(
-      typeof payload.message === "string"
-        ? payload.message
-        : "Request failed.",
-    );
+    throw createOfflineActionError();
   }
 
-  return payload as T;
+  try {
+    const response = await fetch(`${API_URL}${path}`, {
+      method,
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: options?.body ? JSON.stringify(options.body) : undefined,
+    });
+
+    markBackendReachable();
+
+    const payload = (await response.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
+
+    if (!response.ok) {
+      throw new Error(
+        typeof payload.message === "string"
+          ? payload.message
+          : "Request failed.",
+      );
+    }
+
+    if (method === "GET") {
+      writeCachedRequest(path, payload as T);
+    }
+
+    return payload as T;
+  } catch (error) {
+    if (isLikelyConnectivityError(error)) {
+      markBackendUnreachable();
+
+      if (method === "GET") {
+        const cached = readCachedRequest<T>(path);
+        if (cached) return cached;
+      }
+    }
+
+    throw error;
+  }
+}
+
+async function postWithUploadProgress<T>(
+  path: string,
+  body: Record<string, unknown>,
+  onUploadProgress: UploadProgressCallback,
+): Promise<T> {
+  if (!isConnectionAvailable()) {
+    throw createOfflineActionError();
+  }
+
+  try {
+    onUploadProgress(1);
+
+    const response = await axios.post<T>(`${API_URL}${path}`, body, {
+      withCredentials: true,
+      headers: {
+        "Content-Type": "application/json",
+      },
+      onUploadProgress: (event: AxiosProgressEvent) => {
+        if (!event.total) {
+          return;
+        }
+
+        const progress = Math.max(
+          1,
+          Math.min(99, Math.round((event.loaded / event.total) * 100)),
+        );
+        onUploadProgress(progress);
+      },
+    });
+
+    markBackendReachable();
+    onUploadProgress(100);
+
+    return response.data;
+  } catch (error) {
+    if (isLikelyConnectivityError(error)) {
+      markBackendUnreachable();
+    }
+
+    if (axios.isAxiosError(error)) {
+      const data = error.response?.data as { message?: unknown } | undefined;
+      throw new Error(
+        typeof data?.message === "string"
+          ? data.message
+          : error.message || "Request failed.",
+      );
+    }
+
+    throw error;
+  }
 }
 
 const mapTeacherClass = (item: ApiClass): TeacherClass => ({
@@ -659,6 +781,12 @@ const mapNotification = (item: ApiActivityNotification): ActivityNotification =>
   eventAt: item.eventAt,
   dueDate: item.dueDate ?? null,
   createdAt: item.createdAt ?? null,
+  status: item.status === "read" ? "read" : "unread",
+  readAt: item.readAt ?? null,
+  relatedSubmissionId:
+    item.relatedSubmissionId === null || item.relatedSubmissionId === undefined
+      ? null
+      : String(item.relatedSubmissionId),
 });
 
 const mapSubmission = (item: ApiSubmission): ClassSubmission => {
@@ -680,6 +808,7 @@ const mapSubmission = (item: ApiSubmission): ClassSubmission => {
     fileName: item.file_name,
     fileType: item.file_type ?? null,
     fileSize: asNumber(item.file_size),
+    fileDataUrl: item.file_data_url ?? null,
     status: item.status,
     aiProbability: asNumber(item.ai_probability),
     humanProbability,
@@ -741,6 +870,18 @@ export async function fetchUserNotifications(): Promise<ActivityNotification[]> 
   );
 
   return (payload.notifications ?? []).map(mapNotification);
+}
+
+export async function markNotificationRead(notificationId: string): Promise<void> {
+  await request<{ message: string }>(`/notifications/${notificationId}/read`, {
+    method: "PATCH",
+  });
+}
+
+export async function deleteNotification(notificationId: string): Promise<void> {
+  await request<{ message: string }>(`/notifications/${notificationId}`, {
+    method: "DELETE",
+  });
 }
 
 export async function createTeacherClass(input: {
@@ -853,8 +994,29 @@ export async function submitActivitySubmission(
     fileDataUrl?: string;
     extractedText?: string;
   },
+  options?: {
+    onUploadProgress?: UploadProgressCallback;
+  },
 ): Promise<StudentActivitySubmission> {
-  const payload = await request<{
+  const path = `/activities/${activityId}/submissions`;
+  const payload = options?.onUploadProgress
+    ? await postWithUploadProgress<{
+        submission: {
+          id: number;
+          status: string;
+          ai_probability: number | null;
+          is_ai_generated: boolean | null;
+          analysis_details: SubmissionAnalysisDetails | null;
+          submitted_at: string;
+          updated_at: string;
+          content_text: string | null;
+          file_name: string | null;
+          file_type?: string | null;
+          file_size?: number | string | null;
+          submitted_version?: number | string | null;
+        };
+      }>(path, input, options.onUploadProgress)
+    : await request<{
     submission: {
       id: number;
       status: string;
@@ -869,7 +1031,7 @@ export async function submitActivitySubmission(
       file_size?: number | string | null;
       submitted_version?: number | string | null;
     };
-  }>(`/activities/${activityId}/submissions`, {
+  }>(path, {
     method: "POST",
     body: input,
   });

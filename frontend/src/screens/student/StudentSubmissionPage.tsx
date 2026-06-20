@@ -33,18 +33,22 @@ import {
   AlertDialogTrigger,
 } from "../../components/ui/alert-dialog";
 import { GlobalThemeToggle } from "../../components/theme/GlobalThemeToggle";
+import { getRoleThemeStyle } from "../../theme/roleThemes";
+import { useAuth } from "../../context/useAuth";
 import {
   fetchActivityDetail,
   submitActivitySubmission,
   unsubmitActivitySubmission,
   type ActivityDetail,
 } from "./services/studentClassroomService";
+import { useNetworkStatus } from "../../context/NetworkStatusContext";
 import {
   formatFileSize,
   prepareFileUpload,
   saveDraftDocument,
   type PreparedFileUpload,
 } from "../../utils/documentPreview";
+import { navigateBack } from "../../utils/navigation";
 
 const formatDateTime = (value: string | null) => {
   if (!value) {
@@ -72,6 +76,8 @@ const getUploadHelpText = (type: string) =>
 export default function StudentSubmissionPage() {
   const navigate = useNavigate();
   const { activityId } = useParams<{ activityId: string }>();
+  const { online } = useNetworkStatus();
+  const { darkMode } = useAuth();
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const [detail, setDetail] = useState<ActivityDetail | null>(null);
@@ -81,6 +87,8 @@ export default function StudentSubmissionPage() {
   const [draftPreviewId, setDraftPreviewId] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [serverUploadProgress, setServerUploadProgress] = useState(0);
+  const [submissionStatusText, setSubmissionStatusText] = useState("");
   const [isPreparingFile, setIsPreparingFile] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUnsubmitting, setIsUnsubmitting] = useState(false);
@@ -89,6 +97,8 @@ export default function StudentSubmissionPage() {
   const activity = detail?.activity ?? null;
   const submission = detail?.mySubmission ?? null;
   const locked = Boolean(submission) && activity?.allowResubmission === false;
+  const hasUploadPayload =
+    activity?.submissionType === "file" || activity?.submissionType === "image";
 
   const loadDetail = async () => {
     if (!activityId) {
@@ -116,6 +126,11 @@ export default function StudentSubmissionPage() {
   }, [activityId]);
 
   const prepareSelectedFile = async (file: File | undefined) => {
+    if (!online) {
+      toast.error("Internet access is required to upload files.");
+      return;
+    }
+
     if (!file || !activity) {
       return;
     }
@@ -176,6 +191,11 @@ export default function StudentSubmissionPage() {
   };
 
   const handleSubmit = async () => {
+    if (!online) {
+      toast.error("Internet access is required to submit work.");
+      return;
+    }
+
     if (!activity || !activityId || locked) {
       return;
     }
@@ -196,34 +216,62 @@ export default function StudentSubmissionPage() {
     }
 
     setIsSubmitting(true);
+    setServerUploadProgress(activity.submissionType === "essay" ? 100 : 0);
+    setSubmissionStatusText(
+      activity.submissionType === "essay"
+        ? "Analyzing your submission..."
+        : "Uploading... 0%",
+    );
 
     try {
-      await submitActivitySubmission(activityId, {
-        contentText:
-          activity.submissionType === "essay" ? essayContent.trim() : undefined,
-        fileName:
-          activity.submissionType === "essay" ? undefined : preparedUpload?.fileName,
-        fileType:
-          activity.submissionType === "essay" ? undefined : preparedUpload?.fileType,
-        fileSize:
-          activity.submissionType === "essay" ? undefined : preparedUpload?.fileSize,
-        fileDataUrl:
-          activity.submissionType === "essay"
-            ? undefined
-            : preparedUpload?.fileDataUrl,
-      });
+      await submitActivitySubmission(
+        activityId,
+        {
+          contentText:
+            activity.submissionType === "essay" ? essayContent.trim() : undefined,
+          fileName:
+            activity.submissionType === "essay" ? undefined : preparedUpload?.fileName,
+          fileType:
+            activity.submissionType === "essay" ? undefined : preparedUpload?.fileType,
+          fileSize:
+            activity.submissionType === "essay" ? undefined : preparedUpload?.fileSize,
+          fileDataUrl:
+            activity.submissionType === "essay"
+              ? undefined
+              : preparedUpload?.fileDataUrl,
+        },
+        hasUploadPayload
+          ? {
+              onUploadProgress: (progress) => {
+                setServerUploadProgress(progress);
+                setSubmissionStatusText(
+                  progress >= 100
+                    ? "Upload complete. Analyzing..."
+                    : `Uploading... ${progress}%`,
+                );
+              },
+            }
+          : undefined,
+      );
 
       toast.success(submission ? "Submission updated." : "Submission saved.");
       navigate(`/student/classes/${activity.classId}/activities/${activity.id}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to submit work.";
+      setSubmissionStatusText("Submission failed. Please try again.");
       toast.error(message);
     } finally {
       setIsSubmitting(false);
+      setServerUploadProgress(0);
     }
   };
 
   const handleConfirmUnsubmit = async () => {
+    if (!online) {
+      toast.error("Internet access is required to unsubmit work.");
+      return;
+    }
+
     if (!activity || !activityId || !submission || locked || isUnsubmitting) {
       return;
     }
@@ -245,15 +293,21 @@ export default function StudentSubmissionPage() {
   };
 
   return (
-    <div className="h-screen overflow-hidden bg-transparent text-[var(--app-text)]">
+    <div
+      className="role-theme-page h-screen overflow-hidden text-[var(--app-text)]"
+      style={getRoleThemeStyle("student", darkMode)}
+    >
       <header className="fixed left-0 right-0 top-0 z-20 h-16 border-b theme-border bg-[color-mix(in_srgb,var(--app-bg)_72%,transparent)] backdrop-blur-xl">
         <div className="mx-auto flex h-full max-w-6xl items-center justify-between px-4 sm:px-6">
           <Button
             variant="outline"
             onClick={() =>
-              activity
-                ? navigate(`/student/classes/${activity.classId}/activities/${activity.id}`)
-                : navigate("/student/student_screen")
+              navigateBack(
+                navigate,
+                activity
+                  ? `/student/classes/${activity.classId}/activities/${activity.id}`
+                  : "/student/student_screen",
+              )
             }
           >
             <ArrowLeft className="mr-2 h-4 w-4" />
@@ -299,6 +353,11 @@ export default function StudentSubmissionPage() {
                   <p className="text-sm theme-muted">
                     Due {formatDateTime(activity.dueDate)}
                   </p>
+                  {!online && (
+                    <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                      You can review this activity while offline, but uploads and submissions are disabled.
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -325,11 +384,12 @@ export default function StudentSubmissionPage() {
                         type="file"
                         accept={getAcceptedFileTypes(activity.submissionType)}
                         className="hidden"
+                        disabled={!online || isPreparingFile || isSubmitting}
                         onChange={handleFileInput}
                       />
                       <button
                         type="button"
-                        disabled={locked}
+                        disabled={locked || !online || isPreparingFile || isSubmitting}
                         onClick={() => inputRef.current?.click()}
                         onDragOver={handleDragOver}
                         onDragLeave={handleDragLeave}
@@ -339,7 +399,9 @@ export default function StudentSubmissionPage() {
                           dragActive
                             ? "border-[var(--app-accent)] bg-[color-mix(in_srgb,var(--app-accent)_14%,transparent)]"
                             : "theme-border bg-[color-mix(in_srgb,var(--app-surface)_82%,transparent)] hover:border-[var(--app-accent)] hover:bg-[color-mix(in_srgb,var(--app-accent)_8%,transparent)]",
-                          locked ? "cursor-not-allowed opacity-60" : "",
+                          locked || isPreparingFile || isSubmitting
+                            ? "cursor-not-allowed opacity-60"
+                            : "",
                         ].join(" ")}
                       >
                         {activity.submissionType === "image" ? (
@@ -468,17 +530,58 @@ export default function StudentSubmissionPage() {
 
               <Card className="theme-card">
                 <CardContent className="space-y-3 p-5">
+                  {isSubmitting && (
+                    <div className="rounded-2xl border theme-border bg-[color-mix(in_srgb,var(--app-accent)_10%,var(--app-surface))] p-4">
+                      <div className="flex items-start gap-3">
+                        <Loader2 className="mt-0.5 h-5 w-5 animate-spin text-[var(--app-accent)]" />
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-[var(--app-text)]">
+                            {submissionStatusText ||
+                              "Analyzing your submission..."}
+                          </p>
+                          <p className="mt-1 text-sm theme-muted">
+                            Please wait while we process the file and check
+                            content using the detection model.
+                          </p>
+                        </div>
+                      </div>
+                      {hasUploadPayload && (
+                        <div className="mt-4">
+                          <div className="mb-2 flex items-center justify-between text-xs theme-muted">
+                            <span>
+                              {serverUploadProgress >= 100
+                                ? "Upload complete"
+                                : "Uploading"}
+                            </span>
+                            <span>{serverUploadProgress}%</span>
+                          </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--app-muted)_20%,transparent)]">
+                            <div
+                              className="h-full rounded-full bg-[linear-gradient(135deg,var(--app-accent),var(--app-accent-2))] transition-all duration-300"
+                              style={{ width: `${serverUploadProgress}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <Button
                     className="w-full"
                     onClick={() => void handleSubmit()}
-                    disabled={isSubmitting || isPreparingFile || locked}
+                    disabled={isSubmitting || isPreparingFile || locked || !online}
                   >
                     {isSubmitting ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
                       <Send className="mr-2 h-4 w-4" />
                     )}
-                    {submission ? "Submit Changes" : "Submit Work"}
+                    {isSubmitting
+                      ? hasUploadPayload
+                        ? "Uploading and Analyzing..."
+                        : "Analyzing..."
+                      : submission
+                        ? "Submit Changes"
+                        : "Submit Work"}
                   </Button>
                   {submission && (
                     <AlertDialog
@@ -493,7 +596,7 @@ export default function StudentSubmissionPage() {
                         <Button
                           className="w-full"
                           variant="destructive"
-                          disabled={isUnsubmitting || locked}
+                          disabled={isUnsubmitting || locked || !online}
                         >
                           {isUnsubmitting ? (
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />

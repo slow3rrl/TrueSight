@@ -1,13 +1,18 @@
-import { createContext, useEffect, useState } from "react";
+import { createContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { AuthContextType, AuthUser, UserRole } from "./auth-types";
+import { API_BASE_URL } from "../config/api";
+import { RECONNECTED_EVENT } from "./NetworkStatusContext";
+import {
+  createOfflineActionError,
+  isConnectionAvailable,
+  isLikelyConnectivityError,
+  markBackendReachable,
+  markBackendUnreachable,
+} from "../services/connectivity";
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL ??
-  (import.meta.env.DEV ? "http://localhost:5000/api" : "/api")
-).replace(/\/$/, "");
 const API_URL = `${API_BASE_URL}/auth`;
 const DARK_MODE_KEY = "darkMode";
 const LEGACY_THEME_KEY = "truesight-theme";
@@ -53,12 +58,17 @@ type AuthProviderProps = {
   children: React.ReactNode;
 };
 
+const readJson = async (response: Response) =>
+  (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(false);
+  const [sessionReady, setSessionReady] = useState(false);
   const [darkMode, setDarkMode] = useState<boolean>(getInitialDarkMode);
+  const authGenerationRef = useRef(0);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     localStorage.setItem(DARK_MODE_KEY, String(darkMode));
     localStorage.setItem(LEGACY_THEME_KEY, darkMode ? "dark" : "light");
 
@@ -71,31 +81,62 @@ export function AuthProvider({ children }: AuthProviderProps) {
     let active = true;
 
     const hydrateSession = async () => {
+      const generation = authGenerationRef.current;
+
+      if (!isConnectionAvailable()) {
+        if (active) {
+          setSessionReady(true);
+        }
+        return;
+      }
+
       try {
         const response = await fetch(`${API_URL}/me`, {
           method: "GET",
           credentials: "include",
         });
 
+        markBackendReachable();
+
         if (!response.ok) {
+          if (
+            response.status === 401 &&
+            active &&
+            generation === authGenerationRef.current
+          ) {
+            setUser(null);
+          }
           return;
         }
 
-        const payload = (await response.json()) as Record<string, unknown>;
+        const payload = await readJson(response);
         const profile = normalizeUser((payload.user as Record<string, unknown>) ?? null);
 
-        if (active && profile) {
+        if (active && profile && generation === authGenerationRef.current) {
           setUser(profile);
         }
-      } catch {
-        // Silent by design; unauthenticated users should remain on auth routes.
+      } catch (error) {
+        if (isLikelyConnectivityError(error)) {
+          markBackendUnreachable();
+        }
+      } finally {
+        if (active) {
+          setSessionReady(true);
+        }
       }
     };
 
     void hydrateSession();
 
+    const handleReconnect = () => {
+      void hydrateSession();
+    };
+
+    window.addEventListener(RECONNECTED_EVENT, handleReconnect);
+
     return () => {
       active = false;
+      window.removeEventListener(RECONNECTED_EVENT, handleReconnect);
     };
   }, []);
 
@@ -103,7 +144,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setDarkMode((previous) => !previous);
   };
 
-  const signIn = async (email: string, password: string): Promise<void> => {
+  const clearAuthState = () => {
+    authGenerationRef.current += 1;
+    setUser(null);
+  };
+
+  const signIn = async (
+    email: string,
+    password: string,
+    role: UserRole,
+  ): Promise<void> => {
+    if (!isConnectionAvailable()) {
+      throw createOfflineActionError();
+    }
+
     setLoading(true);
     try {
       const response = await fetch(`${API_URL}/login`, {
@@ -112,10 +166,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
           "Content-Type": "application/json",
         },
         credentials: "include",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, role }),
       });
 
-      const payload = (await response.json()) as Record<string, unknown>;
+      markBackendReachable();
+      const payload = await readJson(response);
 
       if (!response.ok) {
         throw new Error(
@@ -123,7 +178,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
         );
       }
 
+      authGenerationRef.current += 1;
       setUser(normalizeUser((payload.user as Record<string, unknown>) ?? null));
+      setSessionReady(true);
+    } catch (error) {
+      clearAuthState();
+      if (isLikelyConnectivityError(error)) {
+        markBackendUnreachable();
+      }
+      throw error;
     } finally {
       setLoading(false);
     }
@@ -133,6 +196,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     credential: string,
     role: UserRole,
   ): Promise<void> => {
+    if (!isConnectionAvailable()) {
+      throw createOfflineActionError();
+    }
+
     setLoading(true);
     try {
       const response = await fetch(`${API_URL}/google`, {
@@ -144,7 +211,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         body: JSON.stringify({ credential, role }),
       });
 
-      const payload = (await response.json()) as Record<string, unknown>;
+      markBackendReachable();
+      const payload = await readJson(response);
 
       if (!response.ok) {
         throw new Error(
@@ -160,7 +228,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
         throw new Error("Failed to parse Google account profile.");
       }
 
+      authGenerationRef.current += 1;
       setUser(profile);
+      setSessionReady(true);
+    } catch (error) {
+      clearAuthState();
+      if (isLikelyConnectivityError(error)) {
+        markBackendUnreachable();
+      }
+      throw error;
     } finally {
       setLoading(false);
     }
@@ -172,6 +248,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     password: string,
     role: UserRole,
   ): Promise<void> => {
+    if (!isConnectionAvailable()) {
+      throw createOfflineActionError();
+    }
+
     setLoading(true);
     try {
       const response = await fetch(`${API_URL}/signup`, {
@@ -183,25 +263,47 @@ export function AuthProvider({ children }: AuthProviderProps) {
         body: JSON.stringify({ name, email, password, role }),
       });
 
-      const payload = (await response.json()) as Record<string, unknown>;
+      markBackendReachable();
+      const payload = await readJson(response);
 
       if (!response.ok) {
         throw new Error(
           typeof payload.message === "string" ? payload.message : "Signup failed.",
         );
       }
+
+      const profile = normalizeUser((payload.user as Record<string, unknown>) ?? null);
+
+      if (!profile) {
+        throw new Error("Failed to parse created account profile.");
+      }
+
+      authGenerationRef.current += 1;
+      setUser(profile);
+      setSessionReady(true);
+    } catch (error) {
+      clearAuthState();
+      if (isLikelyConnectivityError(error)) {
+        markBackendUnreachable();
+      }
+      throw error;
     } finally {
       setLoading(false);
     }
   };
 
   const getMyProfile = async (): Promise<AuthUser | null> => {
+    if (!isConnectionAvailable()) {
+      throw createOfflineActionError();
+    }
+
     const response = await fetch(`${API_URL}/me`, {
       method: "GET",
       credentials: "include",
     });
 
-    const payload = (await response.json()) as Record<string, unknown>;
+    markBackendReachable();
+    const payload = await readJson(response);
 
     if (!response.ok) {
       throw new Error(
@@ -212,7 +314,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     const profile = normalizeUser((payload.user as Record<string, unknown>) ?? null);
+    authGenerationRef.current += 1;
     setUser(profile);
+    setSessionReady(true);
     return profile;
   };
 
@@ -222,6 +326,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     notifications: boolean;
     profileImageUrl: string | null;
   }): Promise<AuthUser> => {
+    if (!isConnectionAvailable()) {
+      throw createOfflineActionError();
+    }
+
     setLoading(true);
     try {
       const response = await fetch(`${API_URL}/me`, {
@@ -233,7 +341,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         body: JSON.stringify(input),
       });
 
-      const payload = (await response.json()) as Record<string, unknown>;
+      markBackendReachable();
+      const payload = await readJson(response);
 
       if (!response.ok) {
         throw new Error(
@@ -251,12 +360,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       setUser(updated);
       return updated;
+    } catch (error) {
+      if (isLikelyConnectivityError(error)) {
+        markBackendUnreachable();
+      }
+      throw error;
     } finally {
       setLoading(false);
     }
   };
 
   const deleteAccount = async (): Promise<void> => {
+    if (!isConnectionAvailable()) {
+      throw createOfflineActionError();
+    }
+
     setLoading(true);
     try {
       const response = await fetch(`${API_URL}/me`, {
@@ -264,7 +382,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         credentials: "include",
       });
 
-      const payload = (await response.json()) as Record<string, unknown>;
+      markBackendReachable();
+      const payload = await readJson(response);
 
       if (!response.ok) {
         throw new Error(
@@ -274,18 +393,45 @@ export function AuthProvider({ children }: AuthProviderProps) {
         );
       }
 
+      authGenerationRef.current += 1;
       setUser(null);
+    } catch (error) {
+      if (isLikelyConnectivityError(error)) {
+        markBackendUnreachable();
+      }
+      throw error;
     } finally {
       setLoading(false);
     }
   };
 
   const logout = async (): Promise<void> => {
-    await fetch(`${API_URL}/logout`, {
-      method: "POST",
-      credentials: "include",
-    });
-    setUser(null);
+    if (!isConnectionAvailable()) {
+      throw createOfflineActionError();
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/logout`, {
+        method: "POST",
+        credentials: "include",
+      });
+      markBackendReachable();
+
+      if (!response.ok) {
+        const payload = await readJson(response);
+        throw new Error(
+          typeof payload.message === "string" ? payload.message : "Logout failed.",
+        );
+      }
+
+      authGenerationRef.current += 1;
+      setUser(null);
+    } catch (error) {
+      if (isLikelyConnectivityError(error)) {
+        markBackendUnreachable();
+      }
+      throw error;
+    }
   };
 
   return (
@@ -293,6 +439,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       value={{
         user,
         loading,
+        sessionReady,
         darkMode,
         toggleTheme,
         signIn,

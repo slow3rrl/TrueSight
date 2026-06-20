@@ -6,6 +6,7 @@ import {
   CalendarClock,
   FileText,
   Home,
+  Loader2,
   Menu,
   Settings,
   WandSparkles,
@@ -16,17 +17,21 @@ import { Card, CardContent } from "../../components/ui/Card";
 import { GlobalThemeToggle } from "../../components/theme/GlobalThemeToggle";
 import { ActivityNotificationsPopover } from "../../components/ActivityNotificationsPopover";
 import { useAuth } from "../../context/useAuth";
+import { getRoleThemeStyle } from "../../theme/roleThemes";
 import {
   analyzeSingleSubmission,
+  fetchDocumentPreview,
   fetchSubmissionDetail,
   fetchUserNotifications,
   type ActivityNotification,
   type ClassSubmission,
+  type PreviewDocument,
 } from "./services/teacherClassroomService";
 import {
   TeacherSidebar,
   type TeacherSection,
 } from "./components/TeacherSidebar";
+import { navigateBack } from "../../utils/navigation";
 
 const SIDEBAR_ITEMS = [
   { key: "home", label: "Home", icon: Home },
@@ -38,15 +43,48 @@ const SIDEBAR_ITEMS = [
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
+const isImageSubmission = (submission: ClassSubmission | null): boolean => {
+  if (!submission) return false;
+  return (
+    submission.submissionType === "image" ||
+    submission.fileType?.toLowerCase().startsWith("image/") === true
+  );
+};
+
+const getImageVerdictTone = (prediction: string, aiProbability: number | null) => {
+  if (prediction === "AI-generated") return "bg-[var(--heatmap-ai-bg)] text-[var(--heatmap-ai-text)]";
+  if (prediction === "Human") return "bg-[var(--heatmap-human-bg)] text-[var(--heatmap-human-text)]";
+  if (prediction === "Needs Review") {
+    return "bg-[var(--heatmap-suspicious-bg)] text-[var(--heatmap-suspicious-text)]";
+  }
+  if (typeof aiProbability === "number") {
+    if (aiProbability >= 70) return "bg-[var(--heatmap-ai-bg)] text-[var(--heatmap-ai-text)]";
+    if (aiProbability >= 40) {
+      return "bg-[var(--heatmap-suspicious-bg)] text-[var(--heatmap-suspicious-text)]";
+    }
+    return "bg-[var(--heatmap-human-bg)] text-[var(--heatmap-human-text)]";
+  }
+  return "bg-[var(--heatmap-suspicious-bg)] text-[var(--heatmap-suspicious-text)]";
+};
+
+const getImageVerdictLabel = (prediction: string) => {
+  if (prediction === "AI-generated") return "AI-generated";
+  if (prediction === "Human") return "Human-created";
+  if (prediction === "Needs Review") return "Suspicious / Unsure";
+  return prediction;
+};
+
 export default function SubmissionDetailPage() {
   const navigate = useNavigate();
   const { submissionId } = useParams<{ submissionId: string }>();
-  const { logout } = useAuth();
+  const { logout, darkMode } = useAuth();
 
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [submission, setSubmission] = useState<ClassSubmission | null>(null);
+  const [imagePreview, setImagePreview] = useState<PreviewDocument | null>(null);
+  const [isImagePreviewLoading, setIsImagePreviewLoading] = useState(false);
   const [notifications, setNotifications] = useState<ActivityNotification[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
@@ -85,6 +123,39 @@ export default function SubmissionDetailPage() {
     void Promise.all([loadSubmission(), loadNotifications()]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submissionId]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadImagePreview = async () => {
+      if (!submission || !isImageSubmission(submission)) {
+        setImagePreview(null);
+        return;
+      }
+
+      setIsImagePreviewLoading(true);
+      try {
+        const preview = await fetchDocumentPreview("submission", submission.id);
+        if (active) {
+          setImagePreview(preview);
+        }
+      } catch {
+        if (active) {
+          setImagePreview(null);
+        }
+      } finally {
+        if (active) {
+          setIsImagePreviewLoading(false);
+        }
+      }
+    };
+
+    void loadImagePreview();
+
+    return () => {
+      active = false;
+    };
+  }, [submission]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -151,9 +222,24 @@ export default function SubmissionDetailPage() {
     analysisDetails && typeof analysisDetails.verdict === "string"
       ? analysisDetails.verdict
       : "Not analyzed yet";
+  const finalPrediction =
+    analysisDetails && typeof analysisDetails.finalPrediction === "string"
+      ? analysisDetails.finalPrediction
+      : verdict;
+  const analysisMessage =
+    analysisDetails && typeof analysisDetails.message === "string"
+      ? analysisDetails.message
+      : null;
+  const threshold =
+    analysisDetails && typeof analysisDetails.threshold === "number"
+      ? analysisDetails.threshold
+      : null;
 
   return (
-    <div className="h-screen overflow-hidden bg-transparent text-[var(--app-text)]">
+    <div
+      className="role-theme-page h-screen overflow-hidden text-[var(--app-text)]"
+      style={getRoleThemeStyle("teacher", darkMode)}
+    >
       <TeacherSidebar
         items={[...SIDEBAR_ITEMS]}
         activeSection={"classes" as TeacherSection}
@@ -202,7 +288,7 @@ export default function SubmissionDetailPage() {
         <div className="flex flex-wrap items-center gap-3">
           <Button
             variant="outline"
-            onClick={() => navigate("/teacher/teacher_screen/classes")}
+            onClick={() => navigateBack(navigate, "/teacher/teacher_screen/classes")}
           >
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Classes
@@ -225,10 +311,31 @@ export default function SubmissionDetailPage() {
             </Button>
           )}
           <Button onClick={() => void handleAnalyze()} disabled={isAnalyzing || !submissionId}>
-            <WandSparkles className="mr-2 h-4 w-4" />
+            {isAnalyzing ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <WandSparkles className="mr-2 h-4 w-4" />
+            )}
             {isAnalyzing ? "Analyzing..." : "Analyze Submission"}
           </Button>
         </div>
+
+        {isAnalyzing && (
+          <Card className="theme-card">
+            <CardContent className="flex items-start gap-3 p-5">
+              <Loader2 className="mt-0.5 h-5 w-5 animate-spin text-[var(--app-accent)]" />
+              <div>
+                <p className="font-semibold text-[var(--app-text)]">
+                  Analyzing your submission...
+                </p>
+                <p className="mt-1 text-sm theme-muted">
+                  Please wait while we process the file and check content using
+                  the detection model.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {loading ? (
           <Card className="theme-card">
@@ -295,10 +402,95 @@ export default function SubmissionDetailPage() {
               </CardContent>
             </Card>
 
+            {isImageSubmission(submission) && (
+              <Card className="theme-card">
+                <CardContent className="space-y-4 p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-lg font-semibold text-[var(--app-text)]">
+                        Image Detection Preview
+                      </h3>
+                      <p className="text-sm theme-muted">
+                        Uploaded image and model result for visual review.
+                      </p>
+                    </div>
+                    <span
+                      className={[
+                        "rounded-full px-3 py-1 text-xs font-bold",
+                        getImageVerdictTone(finalPrediction, submission.aiProbability),
+                      ].join(" ")}
+                    >
+                      {getImageVerdictLabel(finalPrediction)}
+                    </span>
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-[minmax(240px,430px)_1fr] lg:items-center">
+                    <div className="overflow-hidden rounded-2xl border theme-border bg-[color-mix(in_srgb,var(--app-bg)_72%,black)]">
+                      {isImagePreviewLoading ? (
+                        <div className="flex aspect-video items-center justify-center text-sm theme-muted">
+                          Loading image preview...
+                        </div>
+                      ) : imagePreview?.dataUrl || submission.fileDataUrl ? (
+                        <img
+                          src={imagePreview?.dataUrl ?? submission.fileDataUrl ?? ""}
+                          alt={imagePreview?.fileName ?? submission.fileName ?? "Analyzed image"}
+                          className="max-h-[360px] w-full object-contain"
+                        />
+                      ) : (
+                        <div className="flex aspect-video items-center justify-center p-5 text-center text-sm theme-muted">
+                          Image preview is unavailable. Open the full preview to inspect the file.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+                      <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_88%,transparent)] p-3">
+                        <p className="text-xs theme-muted">Verdict</p>
+                        <p className="text-lg font-bold text-[var(--app-text)]">
+                          {getImageVerdictLabel(finalPrediction)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_88%,transparent)] p-3">
+                        <p className="text-xs theme-muted">Confidence</p>
+                        <p className="text-lg font-bold text-[var(--app-text)]">
+                          {typeof submission.confidenceScore === "number"
+                            ? `${submission.confidenceScore.toFixed(2)}%`
+                            : "N/A"}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_88%,transparent)] p-3">
+                        <p className="text-xs theme-muted">AI probability</p>
+                        <p className="text-lg font-bold text-[var(--app-text)]">
+                          {typeof submission.aiProbability === "number"
+                            ? `${submission.aiProbability.toFixed(2)}%`
+                            : "N/A"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             <Card className="theme-card">
               <CardContent className="space-y-3 p-5">
                 <h3 className="text-lg font-semibold text-[var(--app-text)]">Analysis Snapshot</h3>
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)] p-3">
+                    <p className="text-xs theme-muted">Prediction</p>
+                    <p className="text-lg font-bold text-[var(--app-text)]">
+                      {finalPrediction === "AI-generated"
+                        ? "Likely AI-generated"
+                        : finalPrediction === "Human"
+                          ? "Likely Human-created"
+                          : finalPrediction}
+                    </p>
+                    {threshold !== null && (
+                      <p className="mt-1 text-xs theme-muted">
+                        Threshold: {(threshold * 100).toFixed(0)}%
+                      </p>
+                    )}
+                  </div>
                   <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)] p-3">
                     <p className="text-xs theme-muted">AI Probability</p>
                     <p className="text-lg font-bold text-[var(--app-text)]">
@@ -327,6 +519,9 @@ export default function SubmissionDetailPage() {
                 <div className="rounded-xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)] p-3">
                   <p className="text-xs theme-muted">Verdict</p>
                   <p className="font-semibold text-[var(--app-text)]">{verdict}</p>
+                  {analysisMessage && (
+                    <p className="mt-2 text-sm theme-muted">{analysisMessage}</p>
+                  )}
                 </div>
               </CardContent>
             </Card>

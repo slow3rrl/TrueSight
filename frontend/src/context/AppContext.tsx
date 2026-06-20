@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { isConnectionAvailable } from '../services/connectivity';
 
 export type Role = 'teacher' | 'student';
 
@@ -99,8 +100,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [currentUser.theme]);
 
   const generateCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
+  const requireConnection = (action: string) => {
+    if (isConnectionAvailable()) {
+      return true;
+    }
+
+    alert(`Internet access is required to ${action}.`);
+    return false;
+  };
 
   const createClass = (name: string, description: string) => {
+    if (!requireConnection('create a class')) return;
+
     const newClass: ClassItem = {
       id: `c${Date.now()}`,
       name,
@@ -112,6 +123,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const joinClass = (code: string) => {
+    if (!requireConnection('join a class')) return;
+
     const cls = classes.find(c => c.code === code);
     if (!cls) {
       alert('Class not found!');
@@ -121,6 +134,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const createAssignment = (classId: string, title: string, description: string, dueDate: string, submissionType: 'text' | 'document') => {
+    if (!requireConnection('create an assignment')) return;
+
     const newAssignment: Assignment = {
       id: `a${Date.now()}`,
       classId,
@@ -133,6 +148,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const submitAssignment = (assignmentId: string, content: string) => {
+    if (!requireConnection('submit an assignment')) return;
+
     const newSub: Submission = {
       id: `s${Date.now()}`,
       assignmentId,
@@ -147,6 +164,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const analyzeAllSubmissions = async (assignmentId: string) => {
+    if (!requireConnection('analyze submissions')) return;
+
     // Simulate GPTZero API call delay
     return new Promise<void>((resolve) => {
       setTimeout(() => {
@@ -164,6 +183,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateProfile = (updates: Partial<User>) => {
+    if (!requireConnection('update your profile')) return;
+
     setCurrentUser(prev => ({ ...prev, ...updates }));
   };
 

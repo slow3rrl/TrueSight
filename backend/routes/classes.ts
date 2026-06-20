@@ -1,16 +1,25 @@
 import express from "express";
+import type { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
+import type { JwtPayload } from "jsonwebtoken";
 import pool from "../config/db.js";
-import { analyzeText as analyzeTextWithService } from "../services/TextService.ts";
-import { analyzeImage } from "../services/ImageService.ts";
+import { analyzeText as analyzeTextWithService } from "../services/TextService.js";
+import { analyzeImage } from "../services/ImageService.js";
 import {
   extractTextFromSubmissionFile,
   isImageSubmission,
-} from "../services/FileTextExtractor.ts";
+} from "../services/FileTextExtractor.js";
 
 const router = express.Router();
 
 let schemaReady = false;
+
+const notificationTypes = new Set([
+  "new_activity",
+  "upcoming_deadline",
+  "new_submission",
+]);
+const notificationStatuses = new Set(["unread", "read"]);
 
 const ensureClassroomSchema = async () => {
   if (schemaReady) return;
@@ -150,10 +159,60 @@ const ensureClassroomSchema = async () => {
     )
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      receiver_role VARCHAR(20) NOT NULL CHECK (receiver_role IN ('teacher', 'student')),
+      type VARCHAR(40) NOT NULL,
+      severity VARCHAR(20) NOT NULL DEFAULT 'info',
+      title VARCHAR(255) NOT NULL,
+      message TEXT NOT NULL,
+      class_id INTEGER REFERENCES classes(id) ON DELETE SET NULL,
+      activity_id INTEGER REFERENCES activities(id) ON DELETE SET NULL,
+      related_submission_id INTEGER REFERENCES submissions(id) ON DELETE SET NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'unread',
+      read_at TIMESTAMPTZ,
+      dedupe_key VARCHAR(255),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    ALTER TABLE notifications
+    ADD COLUMN IF NOT EXISTS receiver_role VARCHAR(20),
+    ADD COLUMN IF NOT EXISTS type VARCHAR(40),
+    ADD COLUMN IF NOT EXISTS severity VARCHAR(20) NOT NULL DEFAULT 'info',
+    ADD COLUMN IF NOT EXISTS title VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS message TEXT,
+    ADD COLUMN IF NOT EXISTS class_id INTEGER REFERENCES classes(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS activity_id INTEGER REFERENCES activities(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS related_submission_id INTEGER REFERENCES submissions(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'unread',
+    ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS dedupe_key VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  `);
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS notifications_dedupe_key_unique
+    ON notifications (dedupe_key)
+    WHERE dedupe_key IS NOT NULL
+  `);
+
   schemaReady = true;
 };
 
-const protect = async (req, res, next) => {
+const clearAuthCookie = (res: Response) => {
+  res.cookie("token", "", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    maxAge: 1,
+  });
+};
+
+const protect = async (req: Request, res: Response, next: NextFunction) => {
   try {
     await ensureClassroomSchema();
 
@@ -165,7 +224,7 @@ const protect = async (req, res, next) => {
         .json({ message: "Not authorized. No token found." });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as JwtPayload;
 
     const user = await pool.query(
       `SELECT u.id, u.name, u.email, u.role, u.profile_image_url,
@@ -180,9 +239,18 @@ const protect = async (req, res, next) => {
       return res.status(401).json({ message: "User not found." });
     }
 
+    if (
+      typeof decoded.role === "string" &&
+      decoded.role !== user.rows[0].role
+    ) {
+      clearAuthCookie(res);
+      return res.status(401).json({ message: "Invalid or expired token." });
+    }
+
     req.user = user.rows[0];
     next();
   } catch {
+    clearAuthCookie(res);
     return res.status(401).json({ message: "Invalid or expired token." });
   }
 };
@@ -227,6 +295,8 @@ const IMAGE_SUBMISSION_TYPES = new Set([
   "image/jpeg",
   "image/webp",
 ]);
+
+type HttpStatusError = Error & { statusCode?: number };
 
 const asTrimmedString = (value) =>
   typeof value === "string" ? value.trim() : "";
@@ -310,13 +380,13 @@ const normalizeDocumentUpload = ({
   }
 
   if (!normalizedName) {
-    const error = new Error("Document uploads require a file name.");
+    const error: HttpStatusError = new Error("Document uploads require a file name.");
     error.statusCode = 400;
     throw error;
   }
 
   if (!isSupportedDocument(normalizedName, normalizedType)) {
-    const error = new Error(
+    const error: HttpStatusError = new Error(
       "Unsupported document type. Upload PDF, DOC, DOCX, image, or text-based files.",
     );
     error.statusCode = 415;
@@ -328,7 +398,7 @@ const normalizeDocumentUpload = ({
     !/^data:[^;]+;base64,/i.test(normalizedDataUrl) &&
     !/^data:text\/[^,]+,/i.test(normalizedDataUrl)
   ) {
-    const error = new Error("Document preview data is invalid.");
+    const error: HttpStatusError = new Error("Document preview data is invalid.");
     error.statusCode = 400;
     throw error;
   }
@@ -337,7 +407,7 @@ const normalizeDocumentUpload = ({
     normalizedDataUrl &&
     normalizedDataUrl.length > MAX_DOCUMENT_DATA_URL_LENGTH
   ) {
-    const error = new Error("Document is too large to preview in-app.");
+    const error: HttpStatusError = new Error("Document is too large to preview in-app.");
     error.statusCode = 413;
     throw error;
   }
@@ -1079,97 +1149,188 @@ const toISOStringOrNull = (value) => {
   return date.toISOString();
 };
 
-const buildNotificationId = (type, activityId, eventAt) =>
-  `${type}:${String(activityId)}:${String(eventAt)}`;
+const normalizeNotificationType = (type) =>
+  notificationTypes.has(type) ? type : "new_activity";
 
-const formatNotifications = ({
-  newActivities = [],
-  upcomingActivities = [],
-  newSubmissions = [],
+const normalizeNotificationStatus = (status) =>
+  notificationStatuses.has(status) ? status : "unread";
+
+const getStudentVisibleSubmissionStatus = (status) =>
+  status === "analyzed" ? "Analyzed" : "Pending";
+
+const sanitizeStudentSubmission = (submission) => {
+  if (!submission) return null;
+
+  return {
+    id: submission.id,
+    activity_id: submission.activity_id,
+    student_id: submission.student_id,
+    content_text: submission.content_text,
+    file_name: submission.file_name,
+    file_type: submission.file_type,
+    file_size: submission.file_size,
+    status: getStudentVisibleSubmissionStatus(submission.status),
+    submitted_version: submission.submitted_version,
+    submitted_at: submission.submitted_at,
+    updated_at: submission.updated_at,
+  };
+};
+
+const createNotification = async ({
+  userId,
+  receiverRole,
+  type,
+  severity = "info",
+  title,
+  message,
+  classId = null,
+  activityId = null,
+  submissionId = null,
+  createdAt = null,
+  dedupeKey = null,
 }) => {
-  const now = Date.now();
+  if (!userId || !receiverRole || !title || !message) return;
 
-  const newActivityNotifications = newActivities.map((activity) => {
-    const eventAt =
-      toISOStringOrNull(activity.created_at) ?? new Date().toISOString();
-    const dueDate = toISOStringOrNull(activity.due_date);
-
-    return {
-      id: buildNotificationId("new_activity", activity.activity_id, eventAt),
-      type: "new_activity",
-      severity: "info",
-      classId: String(activity.class_id),
-      className: activity.class_name,
-      activityId: String(activity.activity_id),
-      activityTitle: activity.activity_title,
-      title: "New activity added",
-      message: `${activity.activity_title} was added in ${activity.class_name}.`,
-      eventAt,
-      dueDate,
-    };
-  });
-
-  const newSubmissionNotifications = newSubmissions.map((submission) => {
-    const eventAt =
-      toISOStringOrNull(submission.submitted_at) ?? new Date().toISOString();
-
-    return {
-      id: buildNotificationId(
-        "new_submission",
-        submission.submission_id,
-        eventAt,
-      ),
-      type: "new_submission",
-      severity: "info",
-      classId: String(submission.class_id),
-      className: submission.class_name,
-      activityId: String(submission.activity_id),
-      activityTitle: submission.activity_title,
-      title: "New student submission",
-      message: `${submission.student_name} submitted ${submission.activity_title} in ${submission.class_name}.`,
-      eventAt,
-      dueDate: toISOStringOrNull(submission.due_date),
-      createdAt: eventAt,
-    };
-  });
-
-  const upcomingDeadlineNotifications = upcomingActivities.map((activity) => {
-    const dueDate =
-      toISOStringOrNull(activity.due_date) ?? new Date().toISOString();
-    const createdAt = toISOStringOrNull(activity.created_at);
-    const dueInMs = new Date(dueDate).getTime() - now;
-    const dueInHours = dueInMs / (1000 * 60 * 60);
-    const severity = dueInHours <= 1 ? "warning" : "info";
-
-    return {
-      id: buildNotificationId(
-        "upcoming_deadline",
-        activity.activity_id,
-        dueDate,
-      ),
-      type: "upcoming_deadline",
-      severity,
-      classId: String(activity.class_id),
-      className: activity.class_name,
-      activityId: String(activity.activity_id),
-      activityTitle: activity.activity_title,
-      title: "Upcoming deadline",
-      message: `${activity.activity_title} in ${activity.class_name} is due within 1 hour.`,
-      eventAt: dueDate,
-      dueDate,
+  await pool.query(
+    `INSERT INTO notifications (
+       user_id, receiver_role, type, severity, title, message,
+       class_id, activity_id, related_submission_id, created_at, dedupe_key
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::timestamptz, NOW()), $11)
+     ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`,
+    [
+      userId,
+      receiverRole,
+      normalizeNotificationType(type),
+      severity === "warning" ? "warning" : "info",
+      title,
+      message,
+      classId,
+      activityId,
+      submissionId,
       createdAt,
-    };
-  });
+      dedupeKey,
+    ],
+  );
+};
 
-  return [
-    ...newSubmissionNotifications,
-    ...upcomingDeadlineNotifications,
-    ...newActivityNotifications,
-  ].sort((left, right) => {
-    const leftTime = new Date(left.eventAt).getTime();
-    const rightTime = new Date(right.eventAt).getTime();
-    return rightTime - leftTime;
+const createActivityNotifications = async (activityId) => {
+  const activityResult = await pool.query(
+    `SELECT a.id, a.class_id, a.title, a.created_at, a.due_date,
+            c.name AS class_name
+     FROM activities a
+     INNER JOIN classes c ON c.id = a.class_id
+     WHERE a.id = $1
+     LIMIT 1`,
+    [activityId],
+  );
+
+  const activity = activityResult.rows[0];
+  if (!activity) return;
+
+  const students = await pool.query(
+    `SELECT student_id
+     FROM class_enrollments
+     WHERE class_id = $1
+       AND joined_at <= $2`,
+    [activity.class_id, activity.created_at],
+  );
+
+  await Promise.all(
+    students.rows.map((student) =>
+      createNotification({
+        userId: student.student_id,
+        receiverRole: "student",
+        type: "new_activity",
+        title: "New activity added",
+        message: `${activity.title} was added in ${activity.class_name}.`,
+        classId: activity.class_id,
+        activityId: activity.id,
+        createdAt: activity.created_at,
+        dedupeKey: `student:${student.student_id}:new_activity:${activity.id}`,
+      }),
+    ),
+  );
+};
+
+const createSubmissionNotification = async (submissionId) => {
+  const submissionResult = await pool.query(
+    `SELECT s.id, s.submitted_at, s.student_id, s.submitted_version,
+            s.file_name, a.submission_type,
+            a.id AS activity_id, a.class_id, a.title AS activity_title, a.due_date,
+            c.name AS class_name, c.teacher_id, u.name AS student_name
+     FROM submissions s
+     INNER JOIN activities a ON a.id = s.activity_id
+     INNER JOIN classes c ON c.id = a.class_id
+     INNER JOIN users u ON u.id = s.student_id
+     WHERE s.id = $1
+     LIMIT 1`,
+    [submissionId],
+  );
+
+  const submission = submissionResult.rows[0];
+  if (!submission) return;
+
+  const isResubmission = Number(submission.submitted_version ?? 1) > 1;
+  const submissionKind =
+    submission.submission_type === "image"
+      ? "image submission"
+      : submission.submission_type === "file"
+        ? "file submission"
+        : "essay submission";
+  const submittedFile = submission.file_name ? ` (${submission.file_name})` : "";
+
+  await createNotification({
+    userId: submission.teacher_id,
+    receiverRole: "teacher",
+    type: "new_submission",
+    title: isResubmission ? "Student resubmission" : "New student submission",
+    message: `${submission.student_name} ${isResubmission ? "resubmitted" : "submitted"} ${submission.activity_title} as a ${submissionKind}${submittedFile} in ${submission.class_name}.`,
+    classId: submission.class_id,
+    activityId: submission.activity_id,
+    submissionId: submission.id,
+    createdAt: submission.submitted_at,
+    dedupeKey: `teacher:${submission.teacher_id}:new_submission:${submission.id}:v${submission.submitted_version ?? 1}`,
   });
+};
+
+const ensureUpcomingDeadlineNotifications = async (user) => {
+  if (user.role === "student") {
+    const activities = await pool.query(
+      `SELECT a.id AS activity_id, a.class_id, c.name AS class_name,
+              a.title AS activity_title, a.due_date
+       FROM activities a
+       INNER JOIN classes c ON c.id = a.class_id
+       INNER JOIN class_enrollments ce ON ce.class_id = c.id
+       LEFT JOIN submissions s ON s.activity_id = a.id AND s.student_id = $1
+       WHERE ce.student_id = $1
+         AND a.due_date > NOW()
+         AND a.due_date <= NOW() + INTERVAL '1 hour'
+         AND s.id IS NULL`,
+      [user.id],
+    );
+
+    await Promise.all(
+      activities.rows.map((activity) =>
+        createNotification({
+          userId: user.id,
+          receiverRole: "student",
+          type: "upcoming_deadline",
+          severity: "warning",
+          title: "Upcoming deadline",
+          message: `${activity.activity_title} in ${activity.class_name} is due within 1 hour.`,
+          classId: activity.class_id,
+          activityId: activity.activity_id,
+          createdAt: activity.due_date,
+          dedupeKey: `student:${user.id}:upcoming_deadline:${activity.activity_id}`,
+        }),
+      ),
+    );
+
+    return;
+  }
+
+  // Teachers only need review-oriented notifications, such as submissions.
 };
 
 router.get("/mine", protect, async (req, res) => {
@@ -1201,7 +1362,6 @@ router.get("/mine", protect, async (req, res) => {
 
 router.get("/notifications", protect, async (req, res) => {
   try {
-    const userId = req.user.id;
     const role = req.user.role;
 
     if (role !== "teacher" && role !== "student") {
@@ -1210,98 +1370,104 @@ router.get("/notifications", protect, async (req, res) => {
         .json({ message: "Invalid user role for notifications." });
     }
 
-    if (req.user.notifications === false) {
-      return res.status(200).json({ notifications: [] });
-    }
+    await ensureUpcomingDeadlineNotifications(req.user);
 
-    if (role === "student") {
-      const [newActivitiesResult, upcomingActivitiesResult] = await Promise.all(
-        [
-          pool.query(
-            `SELECT a.id AS activity_id, a.class_id, c.name AS class_name,
-                  a.title AS activity_title, a.created_at, a.due_date
-           FROM activities a
-           INNER JOIN classes c ON c.id = a.class_id
-           INNER JOIN class_enrollments ce ON ce.class_id = c.id
-           WHERE ce.student_id = $1
-             AND a.created_at >= ce.joined_at
-             AND a.created_at >= NOW() - INTERVAL '24 hours'
-           ORDER BY a.created_at DESC`,
-            [userId],
-          ),
-          pool.query(
-            `SELECT a.id AS activity_id, a.class_id, c.name AS class_name,
-                  a.title AS activity_title, a.created_at, a.due_date
-           FROM activities a
-           INNER JOIN classes c ON c.id = a.class_id
-           INNER JOIN class_enrollments ce ON ce.class_id = c.id
-           LEFT JOIN submissions s ON s.activity_id = a.id AND s.student_id = $1
-           WHERE ce.student_id = $1
-             AND a.due_date > NOW()
-             AND a.due_date <= NOW() + INTERVAL '1 hour'
-             AND s.id IS NULL
-           ORDER BY a.due_date ASC`,
-            [userId],
-          ),
-        ],
-      );
+    const result = await pool.query(
+      `SELECT n.id, n.type, n.severity, n.title, n.message,
+              n.class_id, c.name AS class_name,
+              n.activity_id, a.title AS activity_title, a.due_date,
+              n.related_submission_id, n.status, n.read_at, n.created_at
+       FROM notifications n
+       LEFT JOIN classes c ON c.id = n.class_id
+       LEFT JOIN activities a ON a.id = n.activity_id
+       WHERE n.user_id = $1
+         AND n.receiver_role = $2
+         AND ($2 <> 'teacher' OR n.type = 'new_submission')
+       ORDER BY n.created_at DESC, n.id DESC
+       LIMIT 100`,
+      [req.user.id, role],
+    );
 
-      const notifications = formatNotifications({
-        newActivities: newActivitiesResult.rows,
-        upcomingActivities: upcomingActivitiesResult.rows,
-      });
-
-      return res.status(200).json({ notifications });
-    }
-
-    const [newActivitiesResult, upcomingActivitiesResult, newSubmissionsResult] =
-      await Promise.all([
-        pool.query(
-          `SELECT a.id AS activity_id, a.class_id, c.name AS class_name,
-                  a.title AS activity_title, a.created_at, a.due_date
-           FROM activities a
-           INNER JOIN classes c ON c.id = a.class_id
-           WHERE c.teacher_id = $1
-             AND a.created_at >= NOW() - INTERVAL '24 hours'
-           ORDER BY a.created_at DESC`,
-          [userId],
-        ),
-        pool.query(
-          `SELECT a.id AS activity_id, a.class_id, c.name AS class_name,
-                  a.title AS activity_title, a.created_at, a.due_date
-           FROM activities a
-           INNER JOIN classes c ON c.id = a.class_id
-           WHERE c.teacher_id = $1
-             AND a.due_date > NOW()
-             AND a.due_date <= NOW() + INTERVAL '1 hour'
-           ORDER BY a.due_date ASC`,
-          [userId],
-        ),
-        pool.query(
-          `SELECT s.id AS submission_id, s.submitted_at,
-                  a.id AS activity_id, a.class_id, a.title AS activity_title,
-                  a.due_date, c.name AS class_name, u.name AS student_name
-           FROM submissions s
-           INNER JOIN activities a ON a.id = s.activity_id
-           INNER JOIN classes c ON c.id = a.class_id
-           INNER JOIN users u ON u.id = s.student_id
-           WHERE c.teacher_id = $1
-             AND s.submitted_at >= NOW() - INTERVAL '24 hours'
-           ORDER BY s.submitted_at DESC`,
-          [userId],
-        ),
-      ]);
-
-    const notifications = formatNotifications({
-      newActivities: newActivitiesResult.rows,
-      upcomingActivities: upcomingActivitiesResult.rows,
-      newSubmissions: newSubmissionsResult.rows,
-    });
+    const notifications = result.rows.map((notification) => ({
+      id: String(notification.id),
+      type: normalizeNotificationType(notification.type),
+      severity: notification.severity === "warning" ? "warning" : "info",
+      classId: notification.class_id ? String(notification.class_id) : "",
+      className: notification.class_name ?? "Unknown class",
+      activityId: notification.activity_id ? String(notification.activity_id) : "",
+      activityTitle: notification.activity_title ?? "Activity unavailable",
+      title: notification.title,
+      message: notification.message,
+      eventAt:
+        toISOStringOrNull(notification.created_at) ?? new Date().toISOString(),
+      dueDate: toISOStringOrNull(notification.due_date),
+      createdAt: toISOStringOrNull(notification.created_at),
+      status: normalizeNotificationStatus(notification.status),
+      readAt: toISOStringOrNull(notification.read_at),
+      relatedSubmissionId: notification.related_submission_id
+        ? String(notification.related_submission_id)
+        : null,
+    }));
 
     return res.status(200).json({ notifications });
   } catch (error) {
     return res.status(500).json({
       message: "Failed to load notifications.",
+      error: error.message,
+    });
+  }
+});
+
+router.patch("/notifications/:notificationId/read", protect, async (req, res) => {
+  try {
+    const notificationId = Number(req.params.notificationId);
+
+    if (!Number.isFinite(notificationId)) {
+      return res.status(400).json({ message: "Invalid notification id." });
+    }
+
+    const result = await pool.query(
+      `UPDATE notifications
+       SET status = 'read', read_at = COALESCE(read_at, NOW())
+       WHERE id = $1 AND user_id = $2
+       RETURNING id`,
+      [notificationId, req.user.id],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Notification not found." });
+    }
+
+    return res.status(200).json({ message: "Notification marked as read." });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Failed to update notification.",
+      error: error.message,
+    });
+  }
+});
+
+router.delete("/notifications/:notificationId", protect, async (req, res) => {
+  try {
+    const notificationId = Number(req.params.notificationId);
+
+    if (!Number.isFinite(notificationId)) {
+      return res.status(400).json({ message: "Invalid notification id." });
+    }
+
+    const result = await pool.query(
+      "DELETE FROM notifications WHERE id = $1 AND user_id = $2 RETURNING id",
+      [notificationId, req.user.id],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Notification not found." });
+    }
+
+    return res.status(200).json({ message: "Notification deleted." });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Failed to delete notification.",
       error: error.message,
     });
   }
@@ -1760,15 +1926,14 @@ router.get("/activities/:activityId", protect, async (req, res) => {
     if (req.user.role === "student") {
       const submissionResult = await pool.query(
         `SELECT id, activity_id, student_id, content_text, file_name, file_type,
-                file_size, status, ai_probability, is_ai_generated, analysis_details,
-                submitted_version, submitted_at, updated_at
+                file_size, status, submitted_version, submitted_at, updated_at
          FROM submissions
          WHERE activity_id = $1 AND student_id = $2
          LIMIT 1`,
         [activityId, req.user.id],
       );
 
-      submission = submissionResult.rows[0] ?? null;
+      submission = sanitizeStudentSubmission(submissionResult.rows[0] ?? null);
 
       const historyResult = await pool.query(
         `SELECT id, submission_id, activity_id, student_id, version, content_text,
@@ -1962,8 +2127,9 @@ router.get("/:classId/activities", protect, async (req, res) => {
         `SELECT a.id, a.class_id, a.title, a.instructor, a.description, a.submission_type,
                 a.allow_resubmission, a.attachment_name, a.attachment_type,
                 a.attachment_size, a.due_date, a.created_at,
-                s.id AS submission_id, s.status AS submission_status, s.ai_probability, s.is_ai_generated,
-                s.analysis_details, s.submitted_at, s.updated_at, s.content_text,
+                s.id AS submission_id,
+                CASE WHEN s.status = 'analyzed' THEN 'Analyzed' ELSE 'Pending' END AS submission_status,
+                s.submitted_at, s.updated_at, s.content_text,
                 s.file_name, s.file_type, s.file_size, s.submitted_version
          FROM activities a
          LEFT JOIN submissions s ON s.activity_id = a.id AND s.student_id = $2
@@ -2085,6 +2251,8 @@ router.post("/:classId/activities", protect, async (req, res) => {
       "UPDATE classes SET assignment_count = assignment_count + 1 WHERE id = $1",
       [classId],
     );
+
+    await createActivityNotifications(insert.rows[0].id);
 
     return res.status(201).json({
       message: "Activity created successfully.",
@@ -2318,9 +2486,11 @@ router.post(
         ],
       );
 
+      await createSubmissionNotification(submission.rows[0].id);
+
       return res.status(200).json({
         message: "Submission saved successfully.",
-        submission: submission.rows[0],
+        submission: sanitizeStudentSubmission(submission.rows[0]),
       });
     } catch (error) {
       if (error.statusCode) {
@@ -2478,7 +2648,7 @@ router.get("/:classId/submissions", protect, async (req, res) => {
     const submissions = await pool.query(
       `SELECT s.id, s.activity_id, a.title AS activity_title, a.submission_type, a.due_date,
               s.student_id, u.name AS student_name, u.email AS student_email,
-              s.content_text, s.file_name, s.file_type, s.file_size,
+              s.content_text, s.file_name, s.file_type, s.file_size, s.file_data_url,
               s.status, s.ai_probability, s.is_ai_generated, s.analysis_details,
               s.submitted_version, s.submitted_at, s.updated_at
        FROM submissions s
@@ -2516,7 +2686,7 @@ router.get("/submissions/:submissionId", protect, async (req, res) => {
       `SELECT s.id, s.activity_id, a.class_id, c.name AS class_name,
               a.title AS activity_title, a.submission_type, a.due_date,
               s.student_id, u.name AS student_name, u.email AS student_email,
-              s.content_text, s.file_name, s.file_type, s.file_size,
+              s.content_text, s.file_name, s.file_type, s.file_size, s.file_data_url,
               s.status, s.ai_probability, s.is_ai_generated, s.analysis_details,
               s.submitted_version, s.submitted_at, s.updated_at
        FROM submissions s

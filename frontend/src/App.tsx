@@ -1,4 +1,4 @@
-import { useLayoutEffect, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   BrowserRouter,
@@ -6,9 +6,15 @@ import {
   Route,
   Routes,
   useLocation,
+  useNavigate,
 } from "react-router-dom";
+import toast from "react-hot-toast";
 import LoginScreen from "./auth/LoginScreen";
 import SignupScreen from "./auth/SignupScreen";
+import StudentLoginModule from "./auth/modules/StudentLoginModule";
+import StudentSignupModule from "./auth/modules/StudentSignupModule";
+import TeacherLoginModule from "./auth/modules/TeacherLoginModule";
+import TeacherSignupModule from "./auth/modules/TeacherSignupModule";
 import StudentScreen from "./screens/student/StudentScreen";
 import StudentActivityDetailsPage from "./screens/student/StudentActivityDetailsPage";
 import StudentSubmissionPage from "./screens/student/StudentSubmissionPage";
@@ -17,6 +23,10 @@ import SubmissionDetailPage from "./screens/teacher/SubmissionDetailPage";
 import SubmissionAnalysisReportPage from "./screens/teacher/SubmissionAnalysisReportPage";
 import IntegrityAnalyticsPage from "./screens/teacher/IntegrityAnalyticsPage";
 import DocumentViewerPage from "./screens/shared/DocumentViewerPage";
+import OfflineInfoPage from "./screens/shared/OfflineInfoPage";
+import { useAuth } from "./context/useAuth";
+import { useNetworkStatus } from "./context/NetworkStatusContext";
+import { canAccessRouteOffline } from "./services/offlineRoutes";
 import "./index.css";
 
 const resetScrollPositions = () => {
@@ -46,6 +56,44 @@ const page = (children: ReactNode) => (
   </motion.div>
 );
 
+function ProtectedRoute({
+  roles,
+  children,
+}: {
+  roles: Array<"student" | "teacher">;
+  children: ReactNode;
+}) {
+  const { user, sessionReady } = useAuth();
+  const location = useLocation();
+
+  if (!sessionReady) {
+    return page(
+      <div className="grid min-h-screen place-items-center bg-[var(--app-bg)] text-sm text-[var(--app-text)]">
+        Loading session...
+      </div>,
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/auth/login_screen" replace state={{ from: location }} />;
+  }
+
+  if (!roles.includes(user.role)) {
+    return (
+      <Navigate
+        to={
+          user.role === "teacher"
+            ? "/teacher/teacher_screen/home"
+            : "/student/student_screen"
+        }
+        replace
+      />
+    );
+  }
+
+  return page(children);
+}
+
 function AnimatedRoutes() {
   const location = useLocation();
 
@@ -65,27 +113,47 @@ function AnimatedRoutes() {
   return (
     <AnimatePresence mode="wait">
       <Routes location={location} key={location.pathname}>
-        <Route path="/" element={<Navigate to="/auth/login_screen" replace />} />
+        <Route path="/" element={page(<LoginScreen />)} />
+        <Route path="/offline" element={page(<OfflineInfoPage />)} />
 
         {/* Auth routes */}
         <Route path="/auth/login_screen" element={page(<LoginScreen />)} />
         <Route path="/auth/signup_screen" element={page(<SignupScreen />)} />
+        <Route path="/auth/student/login" element={page(<StudentLoginModule />)} />
+        <Route path="/auth/student/signup" element={page(<StudentSignupModule />)} />
+        <Route path="/auth/teacher/login" element={page(<TeacherLoginModule />)} />
+        <Route path="/auth/teacher/signup" element={page(<TeacherSignupModule />)} />
 
         {/* Student pages */}
-        <Route path="/student/student_screen" element={page(<StudentScreen />)} />
+        <Route
+          path="/student/student_screen"
+          element={<ProtectedRoute roles={["student"]}><StudentScreen /></ProtectedRoute>}
+        />
+        <Route
+          path="/student/student_screen/:section"
+          element={<ProtectedRoute roles={["student"]}><StudentScreen /></ProtectedRoute>}
+        />
         <Route
           path="/student/classes/:classId/activities/:activityId"
-          element={page(<StudentActivityDetailsPage />)}
+          element={<ProtectedRoute roles={["student"]}><StudentActivityDetailsPage /></ProtectedRoute>}
         />
         <Route
           path="/student/activities/:activityId/submit"
-          element={page(<StudentSubmissionPage />)}
+          element={<ProtectedRoute roles={["student"]}><StudentSubmissionPage /></ProtectedRoute>}
+        />
+        <Route
+          path="/student/classes/:classId/activities/:activityId/submit"
+          element={<ProtectedRoute roles={["student"]}><StudentSubmissionPage /></ProtectedRoute>}
         />
 
         {/* Shared preview */}
         <Route
           path="/documents/:documentType/:documentId"
-          element={page(<DocumentViewerPage />)}
+          element={
+            <ProtectedRoute roles={["student", "teacher"]}>
+              <DocumentViewerPage />
+            </ProtectedRoute>
+          }
         />
 
         {/* Teacher pages */}
@@ -95,17 +163,28 @@ function AnimatedRoutes() {
         />
         <Route
           path="/teacher/submissions/:submissionId"
-          element={page(<SubmissionDetailPage />)}
+          element={<ProtectedRoute roles={["teacher"]}><SubmissionDetailPage /></ProtectedRoute>}
         />
         <Route
           path="/teacher/submissions/:submissionId/analysis"
-          element={page(<SubmissionAnalysisReportPage />)}
+          element={<ProtectedRoute roles={["teacher"]}><SubmissionAnalysisReportPage /></ProtectedRoute>}
         />
         <Route
           path="/teacher/integrity-analytics"
-          element={page(<IntegrityAnalyticsPage />)}
+          element={<ProtectedRoute roles={["teacher"]}><IntegrityAnalyticsPage /></ProtectedRoute>}
         />
-        <Route path="/teacher/teacher_screen/:section" element={page(<TeacherScreen />)} />
+        <Route
+          path="/teacher/analytics"
+          element={<Navigate to="/teacher/integrity-analytics" replace />}
+        />
+        <Route
+          path="/teacher/activities/:activityId"
+          element={<ProtectedRoute roles={["teacher"]}><TeacherScreen /></ProtectedRoute>}
+        />
+        <Route
+          path="/teacher/teacher_screen/:section"
+          element={<ProtectedRoute roles={["teacher"]}><TeacherScreen /></ProtectedRoute>}
+        />
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/auth/login_screen" replace />} />
@@ -114,10 +193,48 @@ function AnimatedRoutes() {
   );
 }
 
+function OfflineRouteGuard({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { online } = useNetworkStatus();
+  const offlineAnchorPathRef = useRef<string | null>(null);
+  const lastBlockedPathRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (online) {
+      offlineAnchorPathRef.current = null;
+      lastBlockedPathRef.current = null;
+      return;
+    }
+
+    const currentPath = `${location.pathname}${location.search}`;
+    offlineAnchorPathRef.current ??= currentPath;
+
+    if (
+      currentPath !== offlineAnchorPathRef.current &&
+      !canAccessRouteOffline(location.pathname)
+    ) {
+      if (lastBlockedPathRef.current !== currentPath) {
+        toast.error("Internet access is required to open that page.");
+        lastBlockedPathRef.current = currentPath;
+      }
+
+      navigate("/offline", {
+        replace: true,
+        state: { blockedPath: currentPath },
+      });
+    }
+  }, [location.pathname, location.search, navigate, online]);
+
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
-      <AnimatedRoutes />
+      <OfflineRouteGuard>
+        <AnimatedRoutes />
+      </OfflineRouteGuard>
     </BrowserRouter>
   );
 }

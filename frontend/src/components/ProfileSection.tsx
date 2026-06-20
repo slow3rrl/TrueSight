@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Camera, Sun, Moon, LogOut, X, Bell, BellOff, Edit2, Check } from 'lucide-react'
-import { useTheme } from '../theme/ThemeContext';
+import { useAuth } from '../context/useAuth';
 import { Button } from './ui/Button'
 import { LogoutConfirmationDialog } from './LogoutConfirmationDialog'
 
@@ -22,7 +22,8 @@ export function ProfileSection({
   enrolledStudentsCount = 0,
   onViewEnrolledStudents
 }: ProfileSectionProps) {
-  const { theme, toggleTheme } = useTheme()
+  const { darkMode, toggleTheme } = useAuth()
+  const theme = darkMode ? 'dark' : 'light'
   const navigate = useNavigate()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [profileImage, setProfileImage] = useState<string | null>(
@@ -57,7 +58,7 @@ export function ProfileSection({
     if (editedName.trim()) {
       localStorage.setItem(`username-${userName}`, editedName)
       setIsEditingName(false)
-      // In a real app, this would update the backend
+      // In production, this would update the backend.
     }
   }
 
@@ -67,14 +68,14 @@ export function ProfileSection({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 space-y-6 animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 duration-300 transition-colors">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[var(--sidebar-backdrop)] animate-in fade-in duration-200 sm:items-center">
+      <div className="theme-surface w-full max-w-md rounded-t-3xl p-6 space-y-6 animate-in slide-in-from-bottom duration-300 sm:rounded-3xl sm:slide-in-from-bottom-0">
         {/* Header */}
         <div className="flex justify-between items-center">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white">Profile Settings</h2>
+          <h2 className="text-xl font-bold text-[var(--app-text)]">Profile Settings</h2>
           <button
             onClick={onClose}
-            className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-500 dark:text-slate-400 transition-colors"
+            className="theme-ring rounded-full p-2 text-[var(--app-muted)] transition-colors hover:bg-[color-mix(in_srgb,var(--app-accent)_10%,transparent)] hover:text-[var(--app-text)]"
           >
             <X className="w-5 h-5" />
           </button>
@@ -83,7 +84,7 @@ export function ProfileSection({
         {/* Profile Photo Section */}
         <div className="flex flex-col items-center gap-4 py-4">
           <div className="relative group">
-            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-3xl font-bold shadow-lg overflow-hidden">
+            <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-[linear-gradient(135deg,var(--app-accent),var(--app-accent-2))] text-3xl font-bold text-white shadow-[var(--app-shadow)]">
               {profileImage ? (
                 <img src={profileImage} alt="Profile" className="w-full h-full object-cover" />
               ) : (
@@ -92,7 +93,7 @@ export function ProfileSection({
             </div>
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="absolute bottom-0 right-0 p-2 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition-colors group-hover:scale-110 duration-200"
+              className="theme-ring absolute bottom-0 right-0 rounded-full bg-[var(--app-accent)] p-2 text-white shadow-[var(--app-shadow)] transition duration-200 hover:scale-105"
             >
               <Camera className="w-4 h-4" />
             </button>
@@ -111,46 +112,46 @@ export function ProfileSection({
                   type="text"
                   value={editedName}
                   onChange={(e) => setEditedName(e.target.value)}
-                  className="px-3 py-1 border border-gray-300 dark:border-slate-600 rounded-lg text-center font-bold text-gray-900 dark:text-white bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="theme-ring rounded-lg border theme-border bg-[color-mix(in_srgb,var(--app-surface)_92%,transparent)] px-3 py-1 text-center font-bold text-[var(--app-text)]"
                   autoFocus
                 />
                 <button
                   onClick={handleSaveName}
-                  className="p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  className="theme-ring rounded-lg bg-[var(--app-accent)] p-1.5 text-white transition-colors"
                 >
                   <Check className="w-4 h-4" />
                 </button>
               </div>
             ) : (
               <div className="flex items-center gap-2 justify-center">
-                <h3 className="font-bold text-lg text-gray-900 dark:text-white">
+                <h3 className="font-bold text-lg text-[var(--app-text)]">
                   {editedName || userName}
                 </h3>
                 <button
                   onClick={() => setIsEditingName(true)}
-                  className="p-1 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                  className="theme-ring p-1 text-[var(--app-muted)] transition-colors hover:text-[var(--app-accent)]"
                 >
                   <Edit2 className="w-4 h-4" />
                 </button>
               </div>
             )}
-            <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">{userRole}</p>
+            <p className="text-sm theme-muted mt-1">{userRole}</p>
           </div>
         </div>
 
         {/* Settings Options */}
         <div className="space-y-3">
           {/* Notifications Toggle */}
-          <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-slate-800 rounded-2xl transition-colors">
+          <div className="flex items-center justify-between rounded-2xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)] p-4 transition-colors">
             <div className="flex items-center gap-3">
               {notificationsEnabled ? (
-                <Bell className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                <Bell className="w-5 h-5 text-[var(--app-accent)]" />
               ) : (
-                <BellOff className="w-5 h-5 text-gray-400" />
+                <BellOff className="w-5 h-5 text-[var(--app-muted)]" />
               )}
               <div>
-                <p className="font-semibold text-gray-900 dark:text-white">Notifications</p>
-                <p className="text-xs text-gray-500 dark:text-slate-400">
+                <p className="font-semibold text-[var(--app-text)]">Notifications</p>
+                <p className="text-xs theme-muted">
                   {notificationsEnabled ? 'Enabled' : 'Disabled'}
                 </p>
               </div>
@@ -158,7 +159,7 @@ export function ProfileSection({
             <button
               onClick={toggleNotifications}
               className={`relative w-14 h-7 rounded-full transition-colors duration-300 ${
-                notificationsEnabled ? 'bg-blue-600' : 'bg-gray-300'
+                notificationsEnabled ? 'bg-[var(--app-accent)]' : 'bg-[color-mix(in_srgb,var(--app-muted)_34%,transparent)]'
               }`}
             >
               <div
@@ -170,16 +171,16 @@ export function ProfileSection({
           </div>
 
           {/* Theme Toggle */}
-          <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-slate-800 rounded-2xl transition-colors">
+          <div className="flex items-center justify-between rounded-2xl border theme-border bg-[color-mix(in_srgb,var(--app-surface)_90%,transparent)] p-4 transition-colors">
             <div className="flex items-center gap-3">
               {theme === 'light' ? (
                 <Sun className="w-5 h-5 text-amber-500" />
               ) : (
-                <Moon className="w-5 h-5 text-blue-400" />
+                <Moon className="w-5 h-5 text-[var(--app-accent)]" />
               )}
               <div>
-                <p className="font-semibold text-gray-900 dark:text-white">Appearance</p>
-                <p className="text-xs text-gray-500 dark:text-slate-400">
+                <p className="font-semibold text-[var(--app-text)]">Appearance</p>
+                <p className="text-xs theme-muted">
                   {theme === 'light' ? 'Light Mode' : 'Dark Mode'}
                 </p>
               </div>
@@ -187,7 +188,7 @@ export function ProfileSection({
             <button
               onClick={toggleTheme}
               className={`relative w-14 h-7 rounded-full transition-colors duration-300 ${
-                theme === 'dark' ? 'bg-blue-600' : 'bg-gray-300'
+                theme === 'dark' ? 'bg-[var(--app-accent)]' : 'bg-[color-mix(in_srgb,var(--app-muted)_34%,transparent)]'
               }`}
             >
               <div
@@ -202,10 +203,10 @@ export function ProfileSection({
           {showEnrolledStudents && (
             <button
               onClick={onViewEnrolledStudents}
-              className="w-full p-4 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-950/50 rounded-2xl flex items-center justify-between transition-colors font-semibold"
+              className="theme-ring flex w-full items-center justify-between rounded-2xl border theme-border bg-[color-mix(in_srgb,var(--app-accent)_10%,var(--app-surface))] p-4 font-semibold text-[var(--app-accent)] transition-colors hover:bg-[color-mix(in_srgb,var(--app-accent)_16%,var(--app-surface))]"
             >
               <span>View Enrolled Students</span>
-              <span className="px-2.5 py-1 bg-blue-600 dark:bg-blue-500 text-white text-xs rounded-full">
+              <span className="rounded-full bg-[var(--app-accent)] px-2.5 py-1 text-xs text-white">
                 {enrolledStudentsCount}
               </span>
             </button>

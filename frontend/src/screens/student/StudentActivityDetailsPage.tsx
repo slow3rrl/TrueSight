@@ -14,11 +14,15 @@ import toast from "react-hot-toast";
 import { Button } from "../../components/ui/Button";
 import { Card, CardContent } from "../../components/ui/Card";
 import { GlobalThemeToggle } from "../../components/theme/GlobalThemeToggle";
+import { getRoleThemeStyle } from "../../theme/roleThemes";
+import { useAuth } from "../../context/useAuth";
 import {
   fetchActivityDetail,
   type ActivityDetail,
 } from "./services/studentClassroomService";
+import { useNetworkStatus } from "../../context/NetworkStatusContext";
 import { formatFileSize } from "../../utils/documentPreview";
+import { navigateBack } from "../../utils/navigation";
 
 const formatDateTime = (value: string | null) => {
   if (!value) {
@@ -45,10 +49,11 @@ const getSubmissionTypeLabel = (type: string) => {
 
 export default function StudentActivityDetailsPage() {
   const navigate = useNavigate();
-  const { classId, activityId } = useParams<{
-    classId: string;
+  const { activityId } = useParams<{
     activityId: string;
   }>();
+  const { online } = useNetworkStatus();
+  const { darkMode } = useAuth();
 
   const [detail, setDetail] = useState<ActivityDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -96,17 +101,16 @@ export default function StudentActivityDetailsPage() {
     };
   }, [activityId]);
 
-  const backTarget = classId ? "/student/student_screen" : -1;
-
   return (
-    <div className="h-screen overflow-hidden bg-transparent text-[var(--app-text)]">
+    <div
+      className="role-theme-page h-screen overflow-hidden text-[var(--app-text)]"
+      style={getRoleThemeStyle("student", darkMode)}
+    >
       <header className="fixed left-0 right-0 top-0 z-20 h-16 border-b theme-border bg-[color-mix(in_srgb,var(--app-bg)_72%,transparent)] backdrop-blur-xl">
         <div className="mx-auto flex h-full max-w-6xl items-center justify-between px-4 sm:px-6">
           <Button
             variant="outline"
-            onClick={() =>
-              typeof backTarget === "string" ? navigate(backTarget) : navigate(backTarget)
-            }
+            onClick={() => navigateBack(navigate, "/student/student_screen")}
           >
             <ArrowLeft className="mr-2 h-4 w-4" />
             Dashboard
@@ -306,8 +310,16 @@ export default function StudentActivityDetailsPage() {
                     )}
                     <Button
                       className="w-full"
-                      onClick={() => navigate(`/student/activities/${activity.id}/submit`)}
-                      disabled={Boolean(submission) && !activity.allowResubmission}
+                      onClick={() => {
+                        if (!online) {
+                          toast.error("Internet access is required to submit activity work.");
+                          return;
+                        }
+
+                        navigate(`/student/activities/${activity.id}/submit`);
+                      }}
+                      disabled={(Boolean(submission) && !activity.allowResubmission) || !online}
+                      title={!online ? "Internet access is required." : undefined}
                     >
                       <Send className="mr-2 h-4 w-4" />
                       {submission ? "Manage Submission" : "Submit Activity"}
